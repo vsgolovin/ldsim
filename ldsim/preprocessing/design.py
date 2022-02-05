@@ -5,30 +5,41 @@ Classes for defining laser diode vertical (epitaxial) and lateral design.
 import numpy as np
 
 
-params = ['Ev', 'Ec', 'Nd', 'Na', 'Nc', 'Nv', 'mu_n', 'mu_p', 'tau_n',
+params = ('Ev', 'Ec', 'Nd', 'Na', 'Nc', 'Nv', 'mu_n', 'mu_p', 'tau_n',
           'tau_p', 'B', 'Cn', 'Cp', 'eps', 'n_refr', 'Eg', 'C_dop',
-          'fca_e', 'fca_h']
-params_active = ['g0', 'N_tr']
+          'fca_e', 'fca_h')
+params_active = ('g0', 'N_tr')
 
 
-class Layer(object):
-    def __init__(self, name, dx, active=False):
+class Layer:
+    def __init__(self, name, thickness, active=False):
         """
-        Parameters:
+        Semiconductor diode layer.
+
+        Parameters
+        ----------
             name : str
                 Layer name.
-            dx : float
+            thickness : float
                 Layer thickness (cm).
             active : bool
-                Whether layer is part of laser diode active region.
+                Whether layer is a part of active region, i.e. takes part
+                in stimulated light emission.
+
         """
         self.name = name
-        self.dx = dx
+        self.dx = thickness
         self.active = active
-        self.d = dict.fromkeys(params, [np.nan])
-        self.d['C_dop'] = self.d['Nd'] = self.d['Na'] = [0.0]
+
+        # initialize `dct_x` and `dct_z`, that store spatial dependencies of all
+        # the parameters as lists of polynomial coefficients
+        self.dct_x = dict.fromkeys(params, [np.nan])
+        self.dct_x['C_dop'] = self.dct_x['Nd'] = self.dct_x['Na'] = [0.0]
+        self.dct_z = dict.fromkeys(params, [1.0])
+        self.dct_z['C_dop'] = self.dct_z['Nd'] = self.dct_z['Na'] = [1.0]
         if active:
-            self.d.update(dict.fromkeys(params_active, [np.nan]))
+            self.dct_x.update(dict.fromkeys(params_active, [np.nan]))
+            self.dct_z.update(dict.fromkeys(params_active, [1.0]))
 
     def __repr__(self):
         s1 = 'Layer \"{}\"'.format(self.name)
@@ -49,66 +60,77 @@ class Layer(object):
     def __str__(self):
         return self.name
 
-    def __eq__(self, other_name):
-        assert isinstance(other_name, str)
-        return self.name == other_name
+    def _choose_dict(self, axis):
+        if axis == 'x':
+            return self.dct_x
+        elif axis == 'z':
+            return self.dct_z
+        raise ValueError(f'Unknown axis {axis}.')
 
-    def calculate(self, param, x):
-        "Calculate value of parameter `param` at location `x`."
-        p = self.d[param]
-        return np.polyval(p, x)
+    def calculate(self, param, x, z=0.0):
+        "Calculate value of parameter `param` at location (`x`, `z`)."
+        p_x = self.dct_x[param]
+        p_z = self.dct_z[param]
+        return np.polyval(p_x, x) * np.polyval(p_z, z)
 
-    def update(self, d):
+    def update(self, d, axis='x'):
         "Update polynomial coefficients of parameters."
+        # check input
         assert isinstance(d, dict)
+        dct = self._choose_dict(axis)
+
+        # update dictionary values
         for k, v in d.items():
             if k not in self.d:
                 raise Exception(f'Unknown parameter {k}')
             if isinstance(v, (int, float)):
-                self.d[k] = [v]
+                dct[k] = [v]
             else:
-                self.d[k] = v
+                dct[k] = v
         if 'Ec' in d or 'Ev' in d:
-            self._update_Eg()
+            self._update_Eg(axis)
         if 'Nd' in d or 'Na' in d:
-            self._update_Cdop()
+            self._update_Cdop(axis)
 
-    def _update_Eg(self):
-        p_Ec = np.asarray(self.d['Ec'])
-        p_Ev = np.asarray(self.d['Ev'])
+    def _update_Eg(self, axis):
+        dct = self._choose_dict(axis)
+        p_Ec = np.asarray(dct['Ec'])
+        p_Ev = np.asarray(dct['Ev'])
         delta = len(p_Ec) - len(p_Ev)
         if delta > 0:
             p_Ev = np.concatenate([np.zeros(delta), p_Ev])
         elif delta < 0:
             p_Ec = np.concatenate([np.zeros(-delta), p_Ec])
-        self.d['Eg'] = p_Ec - p_Ev
+        dct['Eg'] = p_Ec - p_Ev
 
-    def _update_Cdop(self):
-        p_Nd = np.asarray(self.d['Nd'])
-        p_Na = np.asarray(self.d['Na'])
+    def _update_Cdop(self, axis):
+        dct = self._choose_dict(axis)
+        p_Nd = np.asarray(dct['Nd'])
+        p_Na = np.asarray(dct['Na'])
         delta = len(p_Nd) - len(p_Na)
         if delta > 0:
             p_Na = np.concatenate([np.zeros(delta), p_Na])
         elif delta < 0:
             p_Nd = np.concatenate([np.zeros(-delta), p_Nd])
-        self.d['C_dop'] = p_Nd - p_Na
+        dct['C_dop'] = p_Nd - p_Na
 
-    def make_gradient_layer(self, l2, name, dx, active=False, deg=1):
+    def make_gradient_layer(self, other, name, thickness, active=False, deg=1):
         """
         Create a layer where all parameters gradually change from their
-        endvalues in the current layer to values in `l2` at x = 0.
+        endvalues in the current layer to values in `other` at x = 0.
         By default all parameters change linearly, this can be change by
         increasing polynomial degree `deg`.
         """
-        lnew = Layer(name=name, dx=dx, active=active)
-        x = np.array([0, dx])
+        layer_new = Layer(name, thickness, active=active)
+        x = np.array([0, thickness])
         y = np.zeros(2)
         for key in self.d:
             y[0] = self.calculate(key, self.dx)
-            y[1] = l2.calculate(key, 0)
+            y[1] = other.calculate(key, 0)
             p = np.polyfit(x=x, y=y, deg=deg)
-            lnew.update({key: p})
-        return lnew
+            layer_new.update({key: p}, axis='x')
+        layer_new.update(self.dct_z, axis='z')  # same f(z) as in current layer
+        return layer_new
 
 
 class EpiDesign(list):
