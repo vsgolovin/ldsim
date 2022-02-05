@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Classes for defining laser diode vertical (epitaxial) and lateral design.
 """
@@ -156,54 +155,3 @@ class EpiDesign(list):
                 if ix.any():
                     y[ix] = layer.calculate(param, dx[ix])
         return y
-
-
-if __name__ == '__main__':
-
-    d0 = dict(Ev=0.0, Ec=1.424, Nc=4.7e17, Nv=9.0e18, mu_n=8000,
-              mu_p=370, tau_n=5e-9, tau_p=5e-9, B=1e-10, Cn=2e-30,
-              Cp=2e-30, eps=12.9, n_refr=3.493,
-              fca_e=4e-18, fca_h=12e-18)
-    d25 = dict(Ev=-0.125, Ec=1.611, Nc=6.1e17, Nv=1.1e19, mu_n=3125,
-               mu_p=174, tau_n=5e-9, tau_p=5e-9, B=1e-10, Cn=2e-30,
-               Cp=2e-30, eps=12.19, n_refr=3.443,
-               fca_e=4e-18, fca_h=12e-18)
-    d40 = dict(Ev=-0.2, Ec=1.724, Nc=7.5e17, Nv=1.2e19, mu_n=800,
-               mu_p=100, tau_n=5e-9, tau_p=5e-9, B=1e-10, Cn=2e-30,
-               Cp=2e-30, eps=11.764, n_refr=3.351,
-               fca_e=4e-18, fca_h=12e-18)
-
-    ncl = Layer(name='n-cladding', dx=1.5e-4)
-    ncl.update(d40)
-    ncl.update({'Nd': 5e17})
-    nwg = Layer(name='n-waveguide', dx=0.5e-4)
-    nwg.update(d25)
-    nwg.update({'Nd': 1e17})
-    grad_ncl_nwg = ncl.make_gradient_layer(nwg, 'gradient', 0.1e-4)
-    act = Layer(name='active', dx=100e-7, active=True)
-    act.update(d0)
-    act.update({'Nd': 2e16, 'g0': 1500, 'N_tr': 1.85e18})
-    pwg = Layer(name='p-waveguide', dx=0.5e-4)
-    pwg.update(d25)
-    pwg.update({'Na': 1e17})
-    pcl = Layer(name='p-cladding', dx=1.5e-4)
-    pcl.update(d40)
-    pcl.update({'Na': 1e18})
-    grad_pwg_pcl = pwg.make_gradient_layer(pcl, 'gradient', 0.1e-4)
-
-    pin = EpiDesign((ncl, grad_ncl_nwg, nwg, act, pwg, grad_pwg_pcl, pcl))
-    x = np.linspace(0, pin.get_thickness(), 5000)
-    inds, dx = pin._inds_dx(x)
-    Ec = pin.calculate('Ec', x, inds, dx)
-    Ev = pin.calculate('Ev', x)
-    n_refr = pin.calculate('n_refr', x, inds, dx)
-    for param in params:
-        pin.calculate(param, x, inds, dx)
-
-    import matplotlib.pyplot as plt
-    plt.figure()
-    plt.plot(x, Ec, 'b-')
-    plt.plot(x, Ev, 'r-')
-    plt.twinx()
-    plt.plot(x, n_refr, 'g:')
-    plt.show()

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Separate file for generating grid and viewing the operating mode profile
 of a laser diode with design described in `sample_design.py`.
@@ -6,7 +5,7 @@ of a laser diode with design described in `sample_design.py`.
 
 import matplotlib.pyplot as plt
 from sample_design import epi
-from laser_diode_xz import LaserDiode
+from ldsim import LaserDiode
 
 # change default Matplotlib settings
 plt.rc('lines', linewidth=0.7)
@@ -53,3 +52,4 @@ plt.xlabel(r'$x$ ($\mu$m)')
 plt.twinx()
 plt.plot(ld.xin*1e4, ld.yin['n_refr'], 'k:', lw=0.5)
 plt.ylabel('Refractive index')
+plt.show()

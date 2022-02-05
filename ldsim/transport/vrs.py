@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Collection of tools for solving van Roosbroeck (drift-diffusion) system.
 """

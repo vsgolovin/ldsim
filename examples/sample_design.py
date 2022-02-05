@@ -1,9 +1,8 @@
-# -*- coding: utf-8 -*-
 """
 Sample epitaxial design.
 """
 
-from design import Layer, EpiDesign
+from ldsim.preprocessing.design import Layer, EpiDesign
 
 
 # material parameters for different AlGaAs alloys

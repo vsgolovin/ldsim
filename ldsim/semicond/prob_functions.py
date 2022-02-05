@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 """
 A collection of statistical distribution functions for carrier density
 calculation.
@@ -58,19 +56,3 @@ def boltzmann(eta):
     Valid for `eta`<=-2.
     """
     return np.exp(eta)
-
-
-if __name__ == '__main__':
-    import matplotlib.pyplot as plt
-    x = np.linspace(-5, 5, 200)
-    y = fermi_approx(x)
-    y_dot = fermi_dot_approx(x)
-    y_dot_fd = (y[1:] - y[:-1]) / (x[1:] - x[:-1])
-
-    plt.figure('function')
-    plt.plot(x, y)
-
-    plt.figure('derivative')
-    plt.plot(x[:-1], y_dot_fd)
-    plt.plot(x, y_dot)
-    plt.show()

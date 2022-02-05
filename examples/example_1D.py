@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Calculate P-I and J-V curves for a laser diode with design described in
 `sample_design.py` by using a 1D drift-diffusion model.
@@ -7,7 +6,7 @@ Calculate P-I and J-V curves for a laser diode with design described in
 import numpy as np
 import matplotlib.pyplot as plt
 from sample_design import epi
-from laser_diode_xz import LaserDiode
+from ldsim import LaserDiode
 
 # export settings
 export = True
@@ -134,3 +133,5 @@ if export:
                              Isrh_values[i], Irad_values[i],
                              Iaug_values[i], fca_values[i]))
             f.write(','.join(vals))
+
+plt.show()
