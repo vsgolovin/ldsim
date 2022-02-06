@@ -124,16 +124,18 @@ class Layer:
         endvalues in the current layer to values in `other` at x = 0.
         By default all parameters change linearly, this can be change by
         increasing polynomial degree `deg`.
+
+        Z-axis dependency is same as in `self`.
         """
         layer_new = Layer(name, thickness, active=active)
         x = np.array([0, thickness])
-        y = np.zeros(2)
-        for key in self.d:
-            y[0] = self.calculate(key, self.dx)
-            y[1] = other.calculate(key, 0)
-            p = np.polyfit(x=x, y=y, deg=deg)
+        f = np.zeros(2)
+        for key in self.dct_x:
+            f[0] = self.calculate(key, self.dx)
+            f[1] = other.calculate(key, 0)
+            p = np.polyfit(x=x, y=f, deg=deg)
             layer_new.update({key: p}, axis='x')
-        layer_new.update(self.dct_z, axis='z')  # same f(z) as in current layer
+        layer_new.update(self.dct_z, axis='z')
         return layer_new
 
 
