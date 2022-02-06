@@ -3,6 +3,7 @@ Classes for defining laser diode vertical (epitaxial) and lateral design.
 """
 
 import numpy as np
+from ldsim import constants as const, units
 
 
 params = ('Ev', 'Ec', 'Nd', 'Na', 'Nc', 'Nv', 'mu_n', 'mu_p', 'tau_n',
@@ -66,6 +67,9 @@ class Layer:
         elif axis == 'z':
             return self.dct_z
         raise ValueError(f'Unknown axis {axis}.')
+
+    def get_thickness(self):
+        return self.dx
 
     def calculate(self, param, x, z=0.0):
         "Calculate value of parameter `param` at location (`x`, `z`)."
@@ -133,47 +137,136 @@ class Layer:
         return layer_new
 
 
-class EpiDesign(list):
-    "A list of `Layer` objects."
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+class LaserDiode:
+    def __init__(self, layers, L, w, R1, R2, lam, ng, alpha_i, beta_sp):
+        """
+        Class for storing laser diode parameters.
 
-    def boundaries(self):
+        Parameters
+        ----------
+        layers : list
+            Layers that compose the diode (`Layer` objects).
+        L : number
+            Resonator length (cm).
+        w : number
+            Stripe width (cm).
+        R1 : float
+            Back (x=0) mirror reflectivity (0<`R1`<=1).
+        R2 : float
+            Front (x=L) mirror reflectivity (0<`R2`<=1).
+        lam : number
+            Operating wavelength.
+        ng : number
+            Group refractive index.
+        alpha_i : number
+            Internal optical loss (cm-1). Should not include free carrier
+            absorption.
+        beta_sp : number
+            Spontaneous emission factor, i.e. the fraction of spontaneous
+            emission that is coupled with the lasing mode.
+ 
+        """
+        # copy inputs
+        assert all(isinstance(layer, Layer) for layer in layers)
+        self.layers = list(layers)
+        self.L = L
+        self.w = w
+        assert 0 < R1 <= 1 and 0 < R2 <= 1
+        self.R1 = R1
+        self.R2 = R2
+        self.lam = lam
+        self.ng = ng
+        self.alpha_i = alpha_i
+        self.beta_sp = beta_sp
+
+        # additinal attributes
+        self.alpha_m = 1 / (2 * L) * np.log(1 / (R1 * R2))
+        self.photon_energy = const.h * const.c / lam
+        self.is_dimensionless = False
+
+    def make_dimensionless(self):
+        "Make every parameter dimensionless."
+        if self.is_dimensionless:
+            return
+        self.L /= units.x
+        self.w /= units.x
+        self.lam /= units.x
+        self.alpha_i /= 1 / units.x
+        self.alpha_m /= 1 / units.x
+        self.photon_energy /= units.E
+        self.is_dimensionless = True
+
+    def original_units(self):
+        "Convert all values back to original units."
+        if not self.is_dimensionless:
+            return
+        self.L *= units.x
+        self.w *= units.x
+        self.lam *= units.x
+        self.alpha_i *= 1 / units.x
+        self.alpha_m *= 1 / units.x
+        self.photon_energy *= units.E
+        self.is_dimensionless = False
+
+    def get_boundaries(self):
         "Get an array of layer boundaries."
-        return np.cumsum([0.0] + [layer.dx for layer in self])
+        return np.cumsum([0.0] + [layer.get_thickness()
+                                  for layer in self.layers])
 
     def get_thickness(self):
         "Get sum of all layers' thicknesses."
-        return self.boundaries()[-1]
+        return self.get_boundaries()[-1]
+
+    def set_length(self, L):
+        "Change laser diode length (cm)."
+        scale = L / self.L
+        self.L = L
+        for layer in self.layers:
+            for k, v in layer.dct_z:
+                layer.dct_z[k] = [vi / scale for vi in v[:-1]] +[v[-1]]
 
     def _ind_dx(self, x):
+        "Global `x` coordinate -> (Layer index, local `x`)"
         if x == 0:
             return 0, 0.0
         xi = 0.0
-        for i, layer in enumerate(self):
+        for i, layer in enumerate(self.layers):
             if x <= (xi + layer.dx):
                 return i, x - xi
             xi += layer.dx
         return np.nan, np.nan
 
     def _inds_dx(self, x):
+        "Apply `_ind_dx` to every point in array `x`."
+        # flatten x if needed
+        reshape = False
+        if x.ndim > 1:
+            reshape = True
+            shape = x.shape
+            x = x.flatten()
+
+        # find layer indices and relative coordinate values
         inds = np.zeros_like(x)
         dx = np.zeros_like(x)
         for i, xi in enumerate(x):
             inds[i], dx[i] = self._ind_dx(xi)
+
+        if reshape:  # reshape arrays if needed
+            inds = inds.reshape(shape)
+            dx = dx.reshape(shape)
         return inds, dx
 
-    def calculate(self, param, x, inds=None, dx=None):
-        "Calculate values of `param` at locations `x`."
-        y = np.zeros_like(x)
+    def calculate(self, param, x, z=0.0, inds=None, dx=None):
+        "Calculate values of `param` at locations (`x`, `z`)."
+        val = np.zeros_like(x)
         if isinstance(x, (float, int)):
             ind, dx = self._ind_dx(x)
-            return self[ind].calculate(param, dx)
+            return self.layers[ind].calculate(param, dx, z)
         else:
             if inds is None or dx is None:
                 inds, dx = self._inds_dx(x)
-            for i, layer in enumerate(self):
+            for i, layer in enumerate(self.layers):
                 ix = (inds == i)
                 if ix.any():
-                    y[ix] = layer.calculate(param, dx[ix])
-        return y
+                    val[ix] = layer.calculate(param, dx[ix], z)
+        return val
