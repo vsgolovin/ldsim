@@ -36,8 +36,8 @@ class Layer:
         # the parameters as lists of polynomial coefficients
         self.dct_x = dict.fromkeys(params, [np.nan])
         self.dct_x['C_dop'] = self.dct_x['Nd'] = self.dct_x['Na'] = [0.0]
-        self.dct_z = dict.fromkeys(params, [1.0])
-        self.dct_z['C_dop'] = self.dct_z['Nd'] = self.dct_z['Na'] = [1.0]
+        self.dct_z = dict.fromkeys(params, [])
+        self.dct_z['C_dop'] = self.dct_z['Nd'] = self.dct_z['Na'] = []
         if active:
             self.dct_x.update(dict.fromkeys(params_active, [np.nan]))
             self.dct_z.update(dict.fromkeys(params_active, [1.0]))
@@ -75,7 +75,7 @@ class Layer:
         "Calculate value of parameter `param` at location (`x`, `z`)."
         p_x = self.dct_x[param]
         p_z = self.dct_z[param]
-        return np.polyval(p_x, x) * np.polyval(p_z, z)
+        return np.polyval(p_x, x) + np.polyval(p_z + [0.0], z)
 
     def update(self, d, axis='x'):
         "Update polynomial coefficients of parameters."
@@ -85,7 +85,7 @@ class Layer:
 
         # update dictionary values
         for k, v in d.items():
-            if k not in self.d:
+            if k not in self.dct_x:
                 raise Exception(f'Unknown parameter {k}')
             if isinstance(v, (int, float)):
                 dct[k] = [v]
@@ -98,25 +98,25 @@ class Layer:
 
     def _update_Eg(self, axis):
         dct = self._choose_dict(axis)
-        p_Ec = np.asarray(dct['Ec'])
-        p_Ev = np.asarray(dct['Ev'])
+        p_Ec = dct['Ec']
+        p_Ev = dct['Ev']
         delta = len(p_Ec) - len(p_Ev)
         if delta > 0:
-            p_Ev = np.concatenate([np.zeros(delta), p_Ev])
+            p_Ev = [0.0] * delta + p_Ev
         elif delta < 0:
-            p_Ec = np.concatenate([np.zeros(-delta), p_Ec])
-        dct['Eg'] = p_Ec - p_Ev
+            p_Ec = [0.0] * (-delta) + p_Ec
+        dct['Eg'] = [Ec - Ev for Ec, Ev in zip(p_Ec, p_Ev)]
 
     def _update_Cdop(self, axis):
         dct = self._choose_dict(axis)
-        p_Nd = np.asarray(dct['Nd'])
-        p_Na = np.asarray(dct['Na'])
+        p_Nd = dct['Nd']
+        p_Na = dct['Na']
         delta = len(p_Nd) - len(p_Na)
         if delta > 0:
-            p_Na = np.concatenate([np.zeros(delta), p_Na])
+            p_Na = [0.0] * delta + p_Na
         elif delta < 0:
-            p_Nd = np.concatenate([np.zeros(-delta), p_Nd])
-        dct['C_dop'] = p_Nd - p_Na
+            p_Nd = [0.0] * (-delta) + p_Nd
+        dct['C_dop'] = [Nd - Na for Nd, Na in zip(p_Nd, p_Na)]
 
     def make_gradient_layer(self, other, name, thickness, active=False, deg=1):
         """
