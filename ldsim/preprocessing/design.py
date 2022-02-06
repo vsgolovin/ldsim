@@ -32,8 +32,8 @@ class Layer:
         self.dx = thickness
         self.active = active
 
-        # initialize `dct_x` and `dct_z`, that store spatial dependencies of all
-        # the parameters as lists of polynomial coefficients
+        # initialize `dct_x` and `dct_z`, that store spatial dependencies of
+        # all the parameters as lists of polynomial coefficients
         self.dct_x = dict.fromkeys(params, [np.nan])
         self.dct_x['C_dop'] = self.dct_x['Nd'] = self.dct_x['Na'] = [0.0]
         self.dct_z = dict.fromkeys(params, [])
@@ -164,7 +164,7 @@ class LaserDiode:
         beta_sp : number
             Spontaneous emission factor, i.e. the fraction of spontaneous
             emission that is coupled with the lasing mode.
- 
+
         """
         # copy inputs
         assert all(isinstance(layer, Layer) for layer in layers)
@@ -223,7 +223,7 @@ class LaserDiode:
         self.L = L
         for layer in self.layers:
             for k, v in layer.dct_z:
-                layer.dct_z[k] = [vi / scale for vi in v[:-1]] +[v[-1]]
+                layer.dct_z[k] = [vi / scale for vi in v]
 
     def _ind_dx(self, x):
         "Global `x` coordinate -> (Layer index, local `x`)"

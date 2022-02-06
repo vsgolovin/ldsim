@@ -3,7 +3,7 @@ Tests for `ldsim.preprocessing.design`
 """
 
 import numpy as np
-from ldsim.preprocessing.design import Layer
+from ldsim.preprocessing.design import Layer, LaserDiode
 
 
 def test_layer_Eg():
@@ -26,5 +26,17 @@ def test_layer_Cdop():
     C_dop_0 = layer.calculate('C_dop', x)
     ans = np.array([[1e18, 6e17, 2e17],
                     [9e17, 5e17, 1e17],
-                    [8e17, 4e17, 0    ]]) * (-1)
+                    [8e17, 4e17, 0]]) * (-1)
     assert np.allclose(C_dop, ans) and np.allclose(C_dop_0, ans[0])
+
+
+def test_laserdiode_boundaries():
+    layer_mid = Layer('a', 1.0)
+    layer_top = Layer('b', 2.0)
+    layer_bot = Layer('c', 3.0)
+    stack = [layer_bot, layer_mid, layer_top]
+    ld = LaserDiode(stack, L=0.1, w=0.01, R1=0.5, R2=0.2, lam=0.87e-4, ng=3.9,
+                    alpha_i=0.5, beta_sp=1e-5)
+    boundaries = ld.get_boundaries()
+    ans = np.array([0.0, 3.0, 4.0, 6.0])
+    assert np.allclose(boundaries, ans)
