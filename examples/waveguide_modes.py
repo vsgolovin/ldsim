@@ -1,7 +1,5 @@
-import numpy as np
 import matplotlib.pyplot as plt
 from sample_laser import laser
-from ldsim import units
 
 
 # find waveguide mode profiles
@@ -25,12 +23,4 @@ plt.twinx()
 plt.plot(x, results['n'], 'k:')
 plt.ylabel('Refractive index')
 plt.xlabel(r'Coordinate ($\mu$m)')
-# plt.show()
-
-
-xmax = laser.get_thickness()
-x = np.linspace(0, xmax, 200) / units.x
-y = laser.get_waveguide_mode(x, dimensionless=True)
-plt.figure()
-plt.plot(x, y)
 plt.show()
