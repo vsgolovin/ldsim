@@ -260,15 +260,17 @@ class LaserDiode:
 
     def calculate(self, param, x, z=0.0, inds=None, dx=None):
         "Calculate values of `param` at locations (`x`, `z`)."
-        val = np.zeros_like(x)
         if isinstance(x, (float, int)):
             ind, dx = self._ind_dx(x)
-            return self.layers[ind].calculate(param, dx, z)
+            val = self.layers[ind].calculate(param, dx, z)
         else:
+            val = np.zeros_like(x)
             if inds is None or dx is None:
                 inds, dx = self._inds_dx(x)
             for i, layer in enumerate(self.layers):
                 ix = (inds == i)
                 if ix.any():
                     val[ix] = layer.calculate(param, dx[ix], z)
+        if self.is_dimensionless:
+            val /= units.dct[param]
         return val

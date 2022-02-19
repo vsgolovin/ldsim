@@ -40,3 +40,18 @@ def test_laserdiode_boundaries():
     boundaries = ld.get_boundaries()
     ans = np.array([0.0, 3.0, 4.0, 6.0])
     assert np.allclose(boundaries, ans)
+
+
+def test_laserdiode_calculate():
+    p_layer = Layer('P', 1e-4)
+    p_layer.update(dict(Ec=[-2e3, 1.9], Ev=[1e3, 0.0]))
+    i_layer = Layer('i', 0.7e-4)
+    i_layer.update(dict(Ec=1.6, Ev=0.2))
+    n_layer = Layer('N', 2e-4)
+    n_layer.update(dict(Ec=2.0, Ev=[-1e3, 0.1]))
+    ld = LaserDiode([p_layer, i_layer, n_layer], 0.1, 0.01, 0.3, 0.3, 0.87e-4,
+                    3.9, 0.5, 1e-5)
+    x = np.array([0, 0.9, 1.1, 1.6, 1.8, 2.0, 3.6]) * 1e-4
+    y = ld.calculate('Eg', x)
+    y_ans = np.array([1.9, 1.63, 1.4, 1.4, 1.91, 1.93, 2.09])
+    assert np.allclose(y, y_ans)
