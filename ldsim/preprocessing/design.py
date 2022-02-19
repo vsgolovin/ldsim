@@ -3,7 +3,9 @@ Classes for defining laser diode vertical (epitaxial) and lateral design.
 """
 
 import numpy as np
+from scipy.interpolate import interp1d
 from ldsim import constants as const, units
+from .waveguide import solve_wg
 
 
 params = ('Ev', 'Ec', 'Nd', 'Na', 'Nc', 'Nv', 'mu_n', 'mu_p', 'tau_n',
@@ -186,6 +188,11 @@ class LaserDiode:
         self.photon_energy = const.h * const.c / lam
         self.is_dimensionless = False
 
+        # waveguide properties
+        self.gamma = None
+        self.n_eff = None
+        self.waveguide_function = None
+
     def make_dimensionless(self):
         "Make every parameter dimensionless."
         if self.is_dimensionless:
@@ -274,3 +281,79 @@ class LaserDiode:
         if self.is_dimensionless:
             val /= units.dct[param]
         return val
+
+    def _ar_indices(self):
+        """
+        Returns indices of active layers.
+        """
+        return [i for (i, layer) in enumerate(self.layers) if layer.active]
+
+    def _get_ar_mask(self, x):
+        """
+        Returns mask for array `x`, where `True` indicates points inside the
+        active region.
+        """
+        inds, _ = self._inds_dx(x)
+        inds_active = self._ar_indices()
+        ar_ix = np.zeros(x.shape, dtype='bool')
+        for ind in inds_active:
+            ar_ix |= (inds == ind)
+        return ar_ix
+
+    def solve_waveguide(self, step=1e-7, n_modes=3, remove_layers=(0, 0)):
+        """
+        Calculate vertical mode profile. Finds `n_modes` solutions of the
+        eigenvalue problem with the highest eigenvalues (effective
+        indices) and picks the one with the highest optical confinement
+        factor (active region overlap).
+
+        Parameters
+        ----------
+        step : float, optional
+            Uniform mesh step (cm).
+        n_modes : int, optional
+            Number of calculated eigenproblem solutions.
+        remove_layers : (int, int), optional
+            Number of layers to exclude from calculated refractive index
+            profile at each side of the device. Useful to exclude contact
+            layers.
+
+        """
+        # calculate refractive index profile
+        i1, i2 = remove_layers
+        boundaries = self.get_boundaries()
+        x_start = boundaries[i1]
+        x_end = boundaries[len(boundaries) - 1 - i2]
+        x = np.arange(x_start, x_end, step)
+        n = self.calculate('n_refr', x)
+        ar_ix = self._get_ar_mask(x)
+
+        # solve the eigenvalue problem
+        if self.is_dimensionless:
+            lam = self.lam * units.x
+        else:
+            lam = self.lam
+        n_eff_values, modes = solve_wg(x, n, lam, n_modes)
+        # and pick one mode with the largest confinement factor (Gamma)
+        gammas = np.zeros(n_modes)
+        for i in range(n_modes):
+            mode = modes[:, i]
+            gammas[i] = (mode * step)[ar_ix].sum()  # modes are normalized
+        i = np.argmax(gammas)
+        mode = modes[:, i]
+
+        # storing results
+        self.gamma = gammas[i]
+        self.n_eff = n_eff_values[i]
+        self.wgm_fun = interp1d(x, mode, bounds_error=False, fill_value=0)
+
+        # return calculation results in a dictionary
+        return dict(x=x, n=n, modes=modes, n_eff=n_eff_values, gammas=gammas)
+
+    def get_waveguide_mode(self, x, dimensionless):
+        """
+        Return waveguide mode intensity at points `x`.
+        """
+        if dimensionless:
+            return self.wgm_fun(x * units.x) * units.x
+        return self.wgm_fun(x)
