@@ -8,6 +8,7 @@ identical vertical slices are connected via stimulated emission.
 import warnings
 import os
 import numpy as np
+from copy import deepcopy
 from scipy.interpolate import interp1d
 from scipy.interpolate import InterpolatedUnivariateSpline
 from scipy.linalg import solve_banded
@@ -27,7 +28,8 @@ ybn_params = ['Ev', 'Ec', 'Nc', 'Nv', 'mu_n', 'mu_p']
 
 class LaserDiode(object):
 
-    def __init__(self, epi, L, w, R1, R2, lam, ng, alpha_i, beta_sp):
+    def __init__(self, epi, dT, L, w, R1, R2, lam, ng, alpha_i, beta_sp,
+                 T_dependent):
         """
         Class for storing all the model parameters of a 1D/2D laser diode.
         Initialized as a 1D model, as there is no difference between
@@ -37,6 +39,8 @@ class LaserDiode(object):
         ----------
         epi : design.EpiDesign
             Epitaxial design.
+        dT : dict
+            Dictionary of temperature model parameters
         L : number
             Resonator length (cm).
         w : number
@@ -69,11 +73,12 @@ class LaserDiode(object):
                 self.ar_inds.append(i)
         assert has_active_region
         self.epi = epi
+        self.dT = dT
 
         # constants
-        self.Vt = const.kb*const.T
         self.q = const.q
         self.eps_0 = const.eps_0
+        self.T_hs = const.T
 
         # device parameters
         self.L = L
@@ -96,6 +101,10 @@ class LaserDiode(object):
         self.ybn = dict()  # values at boundary nodes
         self.sol = dict()  # current solution (potentials and concentrations)
         self.sol['S'] = 1e-12  # essentially 0
+        self.sol['V'] = 0
+        self.sol['T'] = self.T_hs  # heatsink temperature
+        self.Vt0 = const.kb * self.T_hs
+        self.Vt = const.kb * self.sol['T']
 
         # 2D laser parameters
         self.mz = 1                  # number of z grid nodes
@@ -110,6 +119,7 @@ class LaserDiode(object):
         self._update_Sb_Sf_1D()
 
         self.gen_uniform_mesh(calc_params=False)
+        self.T_dependent = T_dependent
         self.is_dimensionless = False
 
     # grid generation and parameter calculation / scaling
@@ -214,6 +224,7 @@ class LaserDiode(object):
             self._calculate_param(p, 'b', inds, dx)
         if self.n_eff is not None:  # waveguide problem has been solved
             self._calc_wg_mode()
+        self.yin0 = deepcopy(self.yin)
 
     def _calculate_param(self, p, nodes='internal', inds=None, dx=None):
         """
@@ -277,6 +288,7 @@ class LaserDiode(object):
 
         # constants
         self.Vt /= units.V
+        self.Vt0 /= units.V
         self.q /= units.q
         self.eps_0 /= units.q/(units.x*units.V)
 
@@ -299,6 +311,8 @@ class LaserDiode(object):
         # arrays
         for key in self.yin:
             self.yin[key] /= units.dct[key]
+        for key in self.yin0: 
+            self.yin0[key] /= units.dct[key]
         for key in self.ybn:
             self.ybn[key] /= units.dct[key]
         if self.ndim == 1:
@@ -310,6 +324,10 @@ class LaserDiode(object):
                 sol[key] /= units.dct[key]
         self.Sf /= units.n * units.x
         self.Sb /= units.n * units.x
+        
+        # temperature parameters
+        self.dT['dg0_dT'] /= units.dct['g0']
+        self.dT['dNtr_dT'] /= units.dct['N_tr']
 
         self.is_dimensionless = True
 
@@ -320,6 +338,7 @@ class LaserDiode(object):
 
         # constants
         self.Vt *= units.V
+        self.Vt0 *= units.V
         self.q *= units.q
         self.eps_0 *= units.q/(units.x*units.V)
 
@@ -342,6 +361,8 @@ class LaserDiode(object):
         # arrays
         for key in self.yin:
             self.yin[key] *= units.dct[key]
+        for key in self.yin0: 
+            self.yin0[key] *= units.dct[key]
         for key in self.ybn:
             self.ybn[key] *= units.dct[key]
         if self.ndim == 1:
@@ -353,6 +374,10 @@ class LaserDiode(object):
                 sol[key] *= units.dct[key]
         self.Sb *= units.n * units.x
         self.Sf *= units.n * units.x
+        
+        # temperature parameters
+        self.dT['dg0_dT'] *= units.dct['g0']
+        self.dT['dNtr_dT'] *= units.dct['N_tr']
 
         self.is_dimensionless = False
 
@@ -532,6 +557,22 @@ class LaserDiode(object):
         self.sol['phi_p'] = np.zeros_like(sol.x)
         self._update_densities()
 
+    def _calc_T(self):
+        """
+        Calculate temperature distribution in active region using simple 
+        uniform disribution.
+        """
+        P = self.get_P()[0]
+        I = -self.get_I()
+        V = self.get_V()
+        
+        T = self.T_hs
+        # !!! if choose bigger step in voltage instead 0.01 - breaks too
+        # another way: if P > 1e-4:
+        T += self.dT['Rt'] * (I*V - P)            
+        
+        return T
+
     def _update_densities(self):
         """
         Update electron and hole densities using currently stored potentials.
@@ -559,6 +600,48 @@ class LaserDiode(object):
             sol['dn_dphin'] = sc.dn_dphin(psi, phi_n, Nc, Ec, Vt)
             sol['dp_dpsi'] = sc.dp_dpsi(psi, phi_p, Nv, Ev, Vt)
             sol['dp_dphip'] = sc.dp_dphip(psi, phi_p, Nv, Ev, Vt)
+            
+    def _update_temperature(self):
+        """
+        Update all model parameters for calculated temperature.
+        """
+        if self.ndim == 1:
+            solutions = [self.sol]
+        else:  # self.ndim == 2
+            solutions = self.sol2d
+        for sol in solutions:
+            # temperature
+            self.sol['T'] = self._calc_T()
+            dt = self.sol['T'] / self.T_hs
+            delta_t = self.sol['T'] - self.T_hs
+            self.Vt = self.Vt0 * dt
+            def expt(E): 
+                return (np.exp(E/self.Vt0 - E/self.Vt))
+            
+            # update parameters
+            self.yin['Nc'] = self.yin0['Nc'] * dt**(3/2)
+            self.yin['Nv'] = self.yin0['Nv'] * dt**(3/2)
+            self.yin['B'] = self.yin0['B'] * dt**self.dT['dB_dT_p']
+            self.yin['Cn'] = self.yin0['Cn'] * expt(self.dT['dC_dT_Ea'])
+            self.yin['Cp'] = self.yin0['Cp'] * expt(self.dT['dC_dT_Ea'])
+            self.yin['g0'] = self.yin0['g0'] + self.dT['dg0_dT'] * delta_t
+            self.yin['N_tr'] = self.yin0['N_tr'] + self.dT['dNtr_dT'] * delta_t
+            self.yin['fca_e'] = self.yin0['fca_e'] * dt**self.dT['dfca_e_dT_p']
+            self.yin['fca_h'] = self.yin0['fca_h'] * dt**self.dT['dfca_h_dT_p']
+            self.yin['mu_n'] = self.yin0['mu_n'] * dt**self.dT['dmu_n_dT_p']
+            self.yin['mu_p'] = self.yin0['mu_p'] * dt**self.dT['dmu_p_dT_p']
+            #self.yin['Eg'] = self.yin0['Eg'] + \
+            #    (self.dT['dEg_dT_A'] * self.sol['T']**2) / \
+            #        (self.sol['T'] + self.dT['dEg_dT_B'])
+            
+            # equilibrium carrier concentrations
+            #self.yin['psi_lcn'] = ...?
+            self.yin['n0'] = sc.n(psi=self.yin['psi_lcn'], phi_n=0,
+                                  Nc=self.yin['Nc'], Ec=self.yin['Ec'],
+                                  Vt=self.Vt)
+            self.yin['p0'] = sc.p(psi=self.yin['psi_lcn'], phi_p=0,
+                                  Nv=self.yin['Nv'], Ev=self.yin['Ev'],
+                                  Vt=self.Vt)
 
     # waveguide problem
     def solve_waveguide(self, step=1e-7, n_modes=3, remove_layers=(0, 0)):
@@ -637,6 +720,7 @@ class LaserDiode(object):
         # scale voltage
         if self.is_dimensionless:
             V /= units.V
+            self.sol['V'] = V
 
         # 1D: update `self.sol`, 2D: update `self.sol2d`
         if self.ndim == 1:
@@ -696,6 +780,8 @@ class LaserDiode(object):
         self.sol['psi'][1:-1] += dx[:m] * omega
         self.sol['phi_n'][1:-1] += dx[m:2*m] * omega
         self.sol['phi_p'][1:-1] += dx[2*m:] * omega
+        if self.T_dependent: 
+            self._update_temperature()
         self._update_densities()
 
         return fluct
@@ -760,6 +846,8 @@ class LaserDiode(object):
             self.sol['psi'][1:-1] += dx[:mx]*omega
             self.sol['phi_n'][1:-1] += dx[mx:2*mx]*omega
             self.sol['phi_p'][1:-1] += dx[2*mx:3*mx]*omega
+            if self.T_dependent: 
+                self._update_temperature()
             self._update_densities()
             if dx[-1] > 0:
                 self.sol['S'] += dx[-1] * omega_S[0]
@@ -773,6 +861,8 @@ class LaserDiode(object):
                 sol['psi'][1:-1] += dxk[:mx] * omega
                 sol['phi_n'][1:-1] += dxk[mx:2*mx] * omega
                 sol['phi_p'][1:-1] += dxk[2*mx:3*mx] * omega
+            if self.T_dependent: 
+                self._update_temperature()
             self._update_densities()
             dx_S = dx[-2*mz:]
             ix = (dx_S[:mz] > 0)
@@ -1437,6 +1527,14 @@ class LaserDiode(object):
         if self.is_dimensionless:
             P *= units.P
         return P
+    
+    def get_V(self):
+        "Get applied bias"
+        if self.is_dimensionless:
+            V = self.sol['V'] * units.V  
+        else:
+            V = self.sol['V']
+        return V
 
     def get_n_active(self):
         "Get average electron and hole density in the active region."

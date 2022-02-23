@@ -17,6 +17,14 @@ d40 = dict(Ev=-0.2, Ec=1.724, Nc=7.5e17, Nv=1.2e19, mu_n=800, mu_p=100,
            eps=11.764, n_refr=3.351, fca_e=4e-18, fca_h=12e-18)
 
 
+# temperature dependence coefficients of model parameters (for GaAs)
+# _p - power dependence, _Ea - activation energy,
+# Rt - temperature resistance
+dT = dict(dEg_dT_A=5.41e-4, dEg_dT_B=204, dB_dT_p=-1, dC_dT_Ea=0.1, 
+          dfca_e_dT_p=1, dfca_h_dT_p=2, dmu_n_dT_p=-1, dmu_p_dT_p=-2,
+          dg0_dT=-2, dNtr_dT=2e15, Rt=2)  # need to clarify some of them
+
+
 # create Layer objects
 ncont = Layer(name='n-contact', dx=0.25e-4)
 ncont.update(d0)

@@ -6,7 +6,7 @@ drift-diffusion model.
 
 import numpy as np
 import matplotlib.pyplot as plt
-from sample_design import epi
+from sample_design import epi, dT
 from ldsim import LaserDiode, units
 
 
