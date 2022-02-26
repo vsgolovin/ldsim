@@ -4,7 +4,8 @@ Unit values for nondimensionalization.
 import ldsim.constants as const
 
 t = 1e-9
-E = const.kb * const.T
+T = 300
+E = const.kb * T
 V = E / 1.0
 q = const.q
 x = q / (const.eps_0 * V)
@@ -24,4 +25,4 @@ dct = {'Ev': E, 'Ec': E, 'Eg': E, 'Nd': n, 'Na': n, 'C_dop': n,
        'dp_dpsi': n / V, 'dp_dphip': n / V,
        'g0': 1 / x, 'N_tr': n, 'S': n * x,
        'fca_e': 1 / (n * x), 'fca_h': 1 / (n * x),
-       'jn': j, 'jp': j}
+       'jn': j, 'jp': j, 'T': T}

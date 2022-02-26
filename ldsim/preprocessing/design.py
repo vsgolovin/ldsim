@@ -10,8 +10,9 @@ from .waveguide import solve_wg
 
 params = ('Ev', 'Ec', 'Nd', 'Na', 'Nc', 'Nv', 'mu_n', 'mu_p', 'tau_n',
           'tau_p', 'B', 'Cn', 'Cp', 'eps', 'n_refr', 'Eg', 'C_dop',
-          'fca_e', 'fca_h')
+          'fca_e', 'fca_h', 'T')
 params_active = ('g0', 'N_tr')
+DEFAULT_TEMPERATURE = 300.0
 
 
 class Layer:
@@ -38,8 +39,8 @@ class Layer:
         # all the parameters as lists of polynomial coefficients
         self.dct_x = dict.fromkeys(params, [np.nan])
         self.dct_x['C_dop'] = self.dct_x['Nd'] = self.dct_x['Na'] = [0.0]
+        self.dct_x['T'] = [DEFAULT_TEMPERATURE]
         self.dct_z = dict.fromkeys(params, [])
-        self.dct_z['C_dop'] = self.dct_z['Nd'] = self.dct_z['Na'] = []
         if active:
             self.dct_x.update(dict.fromkeys(params_active, [np.nan]))
             self.dct_z.update(dict.fromkeys(params_active, [1.0]))
@@ -92,7 +93,7 @@ class Layer:
             if isinstance(v, (int, float)):
                 dct[k] = [v]
             else:
-                dct[k] = v
+                dct[k] = list(v)
         if 'Ec' in d or 'Ev' in d:
             self._update_Eg(axis)
         if 'Nd' in d or 'Na' in d:
