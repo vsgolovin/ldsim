@@ -189,6 +189,11 @@ class LaserDiode:
         self.photon_energy = const.h * const.c / lam
         self.is_dimensionless = False
 
+        # constants
+        self.kb = const.kb
+        self.q = const.q
+        self.eps_0 = const.eps_0
+
         # waveguide properties
         self.gamma = None
         self.n_eff = None
@@ -204,6 +209,9 @@ class LaserDiode:
         self.alpha_i /= 1 / units.x
         self.alpha_m /= 1 / units.x
         self.photon_energy /= units.E
+        self.kb /= units.E / units.T
+        self.q /= units.q
+        self.eps_0 /= units.q / (units.x * units.V)
         self.is_dimensionless = True
 
     def original_units(self):
@@ -216,6 +224,9 @@ class LaserDiode:
         self.alpha_i *= 1 / units.x
         self.alpha_m *= 1 / units.x
         self.photon_energy *= units.E
+        self.kb = const.kb
+        self.q = const.q
+        self.eps_0 = const.eps_0
         self.is_dimensionless = False
 
     def get_boundaries(self):
