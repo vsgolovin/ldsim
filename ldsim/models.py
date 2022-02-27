@@ -1,5 +1,6 @@
 import warnings
 import numpy as np
+from scipy.linalg import solve_banded
 from ldsim.preprocessing.design import LaserDiode
 from ldsim.mesh import generate_nonuniform_mesh
 from ldsim import units, newton, semicond
@@ -14,8 +15,8 @@ class LaserDiodeModel1d(LaserDiode):
     input_params_boundaries = ['Ev', 'Ec', 'Nc', 'Nv', 'mu_n', 'mu_p']
     params_active = ['g0', 'N_tr']
     calculated_params_nodes = [
-        'Vt', 'psi_lcn', 'n0', 'p0']
-    solution_arrays = ['psi', 'phi_n', 'phi_p']
+        'Vt', 'psi_lcn', 'n0', 'p0', 'psi_bi']
+    solution_arrays = ['psi', 'phi_n', 'phi_p', 'n', 'p']
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -34,6 +35,14 @@ class LaserDiodeModel1d(LaserDiode):
 
     def _update_Vt(self):
         self.vn['Vt'] = self.vn['T'] * self.kb
+
+    def _update_densities(self):
+        s = self.sol
+        v = self.vn
+        self.sol['n'] = semicond.n(s['psi'], s['phi_n'], v['Nc'], v['Ec'],
+                                   v['Vt'])
+        self.sol['p'] = semicond.p(s['psi'], s['phi_p'], v['Nv'], v['Ev'],
+                                   v['Vt'])
 
     def generate_nonuniform_mesh(self, step_uni=5e-8, step_min=1e-7,
                                  step_max=20e-7, sigma=100e-7,
@@ -82,20 +91,22 @@ class LaserDiodeModel1d(LaserDiode):
 
     def make_dimensionless(self):
         "Make every parameter dimensionless."
-        for param in self.vn:
-            if self.vn[param] is not None:
-                self.vn[param] /= units.dct[param]
-        for param in self.vb:
-            self.vb[param] /= units.dct[param]
+        self.xn /= units.x
+        self.xb /= units.x
+        for d in (self.vn, self.vb, self.sol):
+            for param in d:
+                if d[param] is not None:
+                    d[param] /= units.dct[param]
         return super().make_dimensionless()
 
     def original_units(self):
         "Convert all values back to original units."
-        for param in self.vn:
-            if self.vn[param] is not None:
-                self.vn[param] *= units.dct[param]
-        for param in self.vb:
-            self.vb[param] *= units.dct[param]
+        self.xn *= units.x
+        self.xb *= units.x
+        for d in (self.vn, self.vb, self.sol):
+            for param in d:
+                if d[param] is not None:
+                    d[param] *= units.dct[param]
         return super().original_units()
 
     def make_lcn_solver(self):
@@ -158,3 +169,65 @@ class LaserDiodeModel1d(LaserDiode):
         self.vn['p0'] = semicond.p(psi=self.vn['psi_lcn'], phi_p=0,
                                    Nv=self.vn['Nv'], Ev=self.vn['Ev'],
                                    Vt=self.vn['Vt'])
+
+    def make_equilibrium_solver(self):
+        """
+        Generate solver for electrostatic potential distribution along
+        vertical axis at equilibrium.
+        """
+        if self.vn['psi_lcn'] is None:
+            self.solve_lcn()
+
+        h = self.xn[1:] - self.xn[:-1]
+        w = self.xb[1:] - self.xb[:-1]
+        v = self.vn
+
+        def res(psi):
+            n = semicond.n(psi, 0, v['Nc'], v['Ec'], v['Vt'])
+            p = semicond.p(psi, 0, v['Nv'], v['Ev'], v['Vt'])
+            r = eq.poisson_res(psi, n, p, h, w, v['eps'], self.eps_0, self.q,
+                               v['C_dop'])
+            return r
+
+        def jac(psi):
+            n = semicond.n(psi, 0, v['Nc'], v['Ec'], v['Vt'])
+            ndot = semicond.dn_dpsi(psi, 0, v['Nc'], v['Ec'], v['Vt'])
+            p = semicond.p(psi, 0, v['Nv'], v['Ev'], v['Vt'])
+            pdot = semicond.dp_dpsi(psi, 0, v['Nv'], v['Ev'], v['Vt'])
+            j = eq.poisson_jac(psi, n, ndot, p, pdot, h, w, v['eps'],
+                               self.eps_0, self.q, v['C_dop'])
+            return j
+
+        psi_init = v['psi_lcn'].copy()
+        sol = newton.NewtonSolver(
+            res=res, jac=jac, x0=psi_init,
+            linalg_solver=lambda A, b: solve_banded((1, 1), A, b),
+            inds=np.arange(1, len(psi_init) - 1))
+        return sol
+
+    def solve_equilibrium(self, maxiter=100, fluct=1e-8, omega=1.0):
+        """
+        Calculate electrostatic potential distribution at equilibrium (zero
+        external bias). Uses Newton's method implemented in `NewtonSolver`.
+
+        Parameters
+        ----------
+        maxiter : int, optional
+            Maximum number of Newton's method iterations.
+        fluct : float, optional
+            Fluctuation of solution that is needed to stop iterating before
+            reacing `maxiter` steps.
+        omega : float, optional
+            Damping parameter.
+
+        """
+        sol = self.make_equilibrium_solver()
+        sol.solve(maxiter, fluct, omega)
+        if sol.fluct[-1] > fluct:
+            warnings.warn('LaserDiode1D.solve_equilibrium(): fluctuation ' +
+                          f'{sol.fluct[-1]:.3e} exceeds {fluct:.3e}.')
+        self.vn['psi_bi'] = sol.x.copy()
+        self.sol['psi'] = sol.x.copy()
+        self.sol['phi_n'] = np.zeros_like(sol.x)
+        self.sol['phi_p'] = np.zeros_like(sol.x)
+        self._update_densities()
