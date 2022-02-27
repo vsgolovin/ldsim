@@ -1,7 +1,9 @@
+import warnings
 import numpy as np
 from ldsim.preprocessing.design import LaserDiode
 from ldsim.mesh import generate_nonuniform_mesh
-from ldsim import units
+from ldsim import units, newton, semicond
+import ldsim.semicond.equilibrium as eq
 
 
 class LaserDiodeModel1d(LaserDiode):
@@ -11,6 +13,8 @@ class LaserDiodeModel1d(LaserDiode):
         'fca_e', 'fca_h', 'T']
     input_params_boundaries = ['Ev', 'Ec', 'Nc', 'Nv', 'mu_n', 'mu_p']
     params_active = ['g0', 'N_tr']
+    calculated_params_nodes = [
+        'Vt', 'psi_lcn', 'n0', 'p0']
     solution_arrays = ['psi', 'phi_n', 'phi_p']
 
     def __init__(self, *args, **kwargs):
@@ -22,10 +26,14 @@ class LaserDiodeModel1d(LaserDiode):
         self.ar_ix = None  # active region mask for xn
 
         # parameters at mesh nodes and volume boundaries
-        self.vn = dict.fromkeys(self.input_params_nodes)
+        self.vn = dict.fromkeys(self.input_params_nodes
+                                + self.calculated_params_nodes)
         self.vb = dict.fromkeys(self.input_params_boundaries)
         self.sol = dict.fromkeys(self.solution_arrays)
         self.S = 1e-12
+
+    def _update_Vt(self):
+        self.vn['Vt'] = self.vn['T'] * self.kb
 
     def generate_nonuniform_mesh(self, step_uni=5e-8, step_min=1e-7,
                                  step_max=20e-7, sigma=100e-7,
@@ -53,7 +61,7 @@ class LaserDiodeModel1d(LaserDiode):
         """
         # nodes
         inds, dx = self._inds_dx(self.xn)
-        for param in self.vn:
+        for param in self.input_params_nodes:
             if param in self.params_active:
                 continue
             self.vn[param] = self.calculate(
@@ -70,10 +78,13 @@ class LaserDiodeModel1d(LaserDiode):
             self.vb[param] = self.calculate(
                 param, self.xb, z=0, inds=inds, dx=dx)
 
+        self._update_Vt()
+
     def make_dimensionless(self):
         "Make every parameter dimensionless."
         for param in self.vn:
-            self.vn[param] /= units.dct[param]
+            if self.vn[param] is not None:
+                self.vn[param] /= units.dct[param]
         for param in self.vb:
             self.vb[param] /= units.dct[param]
         return super().make_dimensionless()
@@ -81,7 +92,69 @@ class LaserDiodeModel1d(LaserDiode):
     def original_units(self):
         "Convert all values back to original units."
         for param in self.vn:
-            self.vn[param] *= units.dct[param]
+            if self.vn[param] is not None:
+                self.vn[param] *= units.dct[param]
         for param in self.vb:
             self.vb[param] *= units.dct[param]
         return super().original_units()
+
+    def make_lcn_solver(self):
+        """
+        Make solver for electrostatic potential distribution along the
+        vertical axis at equilibrium assuming local charge neutrality.
+        """
+        Nc = self.vn['Nc']
+        Nv = self.vn['Nv']
+        Ec = self.vn['Ec']
+        Ev = self.vn['Ev']
+        Vt = self.vn['Vt']
+
+        def f(psi):
+            n = semicond.n(psi, 0, Nc, Ec, Vt)
+            p = semicond.p(psi, 0, Nv, Ev, Vt)
+            return self.vn['C_dop'] - n + p
+
+        def fdot(psi):
+            ndot = semicond.dn_dpsi(psi, 0, Nc, Ec, Vt)
+            pdot = semicond.dp_dpsi(psi, 0, Nv, Ev, Vt)
+            return pdot - ndot
+
+        # initial guess with Boltzmann statistics
+        ni = eq.intrinsic_concentration(Nc, Nv, Ec, Ev, Vt)
+        Ei = eq.intrinsic_level(Nc, Nv, Ec, Ev, Vt)
+        Ef_i = eq.Ef_lcn_boltzmann(self.vn['C_dop'], ni, Ei, Vt)
+
+        # Jacobian is a vector -> element-wise division
+        sol = newton.NewtonSolver(res=f, jac=fdot, x0=Ef_i,
+                                  linalg_solver=lambda A, b: b / A)
+        return sol
+
+    def solve_lcn(self, maxiter=100, fluct=1e-8, omega=1.0):
+        """
+        Find potential distribution at zero external bias assuming local
+        charge neutrality. Uses Newton's method implemented in `NewtonSolver`.
+
+        Parameters
+        ----------
+        maxiter : int, optional
+            Maximum number of Newton's method iterations.
+        fluct : float, optional
+            Fluctuation of solution that is needed to stop iterating before
+            reaching `maxiter` steps.
+        omega : float, optional
+            Damping parameter.
+
+        """
+        solver = self.make_lcn_solver()
+        solver.solve(maxiter, fluct, omega)
+        if solver.fluct[-1] > fluct:
+            warnings.warn('LaserDiode1D.solve_lcn(): fluctuation ' +
+                          f'{solver.fluct[-1]:.3e} exceeds {fluct:.3e}.')
+
+        self.vn['psi_lcn'] = solver.x.copy()
+        self.vn['n0'] = semicond.n(psi=self.vn['psi_lcn'], phi_n=0,
+                                   Nc=self.vn['Nc'], Ec=self.vn['Ec'],
+                                   Vt=self.vn['Vt'])
+        self.vn['p0'] = semicond.p(psi=self.vn['psi_lcn'], phi_p=0,
+                                   Nv=self.vn['Nv'], Ev=self.vn['Ev'],
+                                   Vt=self.vn['Vt'])

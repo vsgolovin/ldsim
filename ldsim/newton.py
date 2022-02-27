@@ -55,7 +55,7 @@ class NewtonSolver(object):
 
         """
         # check omega value
-        assert omega>0 and omega<=1.0
+        assert omega > 0 and omega <= 1.0
 
         # calculate residual and Jacobian
         self.rvec = self.rfun(self.x)
@@ -85,5 +85,5 @@ class NewtonSolver(object):
         """
         for _ in range(maxiter):
             self.step(omega)
-            if self.fluct[-1]<fluct:
+            if self.fluct[-1] < fluct:
                 break
