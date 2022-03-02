@@ -6,7 +6,7 @@ drift-diffusion model.
 
 import numpy as np
 import matplotlib.pyplot as plt
-from sample_design import epi, dT
+from sample_design import epi, dT_AlGaAs
 from ldsim import LaserDiode, units
 
 
@@ -16,8 +16,9 @@ export_folder = 'results'
 
 # set up the problem
 # initialize as 1D, because below threshold 1D and 2D models are identical
-ld = LaserDiode(epi=epi, L=3000e-4, w=100e-4, R1=0.95, R2=0.05,
-                lam=0.87e-4, ng=3.9, alpha_i=0.5, beta_sp=1e-4)
+ld = LaserDiode(epi=epi, dT=dT_AlGaAs, L=3000e-4, w=100e-4, R1=0.95, R2=0.05,
+                lam=0.87e-4, ng=3.9, alpha_i=0.5, beta_sp=1e-4,
+                T_dependent=True)
 ld.gen_nonuniform_mesh(step_min=1e-7, step_max=20e-7, sigma=1e-5,
                        y_ext=[0.3, 0.3])
 ld.make_dimensionless()
@@ -27,7 +28,8 @@ ld.solve_equilibrium()
 mz = 10  # number of 1D slices along the longitudinal (z) axis
 
 # arrays for storing results
-voltages = np.arange(0, 2.51, 0.1)
+#voltages = np.arange(0, 2.51, 0.1)
+voltages = np.hstack([np.arange(0, 1.45, 0.025), np.arange(1.45, 1.65, 0.01)])
 mv = len(voltages)
 J_values = np.zeros((mz, mv))
 Jsrh_values = np.zeros((mz, mv))  # Shockley-Read-Hall
@@ -53,7 +55,7 @@ while i < mv:
     if ld.ndim == 1:
         fluct_max = 1e-8
     else:  # 2D
-        fluct_max = 1e-11
+        fluct_max = 1e-9
     while fluct > fluct_max:  # perform Newton's method iterations
         # choose value of damping parameter `omega`
         # depending on fluctuation and number of dimensions
@@ -67,10 +69,10 @@ while i < mv:
         else:
             if fluct > 1e-1:
                 omega = 0.05
-                omega_S = (0.05, 0.05)
+                omega_S = (1.0, 0.05)
             else:
-                omega = 1.0
-                omega_S = (1.0, 1.0)
+                omega = 0.25
+                omega_S = (1.0, 0.25)
         # perform single Newton iteration
         fluct = ld.lasing_step(omega=omega, omega_S=omega_S, discr='mSG')
 
@@ -79,7 +81,7 @@ while i < mv:
     if export:
         ld.export_results(folder=export_folder, x_to_um=True)
 
-    if ld.ndim == 1 and P1 + P2 > 1e-2:  # reached threshold
+    if ld.ndim == 1 and P1 + P2 > 1e-3:  # reached threshold
         print('Reached threshold. Transitioning to a 2D model.')
         ld.to_2D(mz)
         continue  # find 2D solution at same voltage

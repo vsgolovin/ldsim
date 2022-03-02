@@ -20,9 +20,8 @@ d40 = dict(Ev=-0.2, Ec=1.724, Nc=7.5e17, Nv=1.2e19, mu_n=800, mu_p=100,
 # temperature dependence coefficients of model parameters (for GaAs)
 # _p - power dependence, _Ea - activation energy,
 # Rt - temperature resistance
-dT = dict(dEg_dT_A=5.41e-4, dEg_dT_B=204, dB_dT_p=-1, dC_dT_Ea=0.1, 
-          dfca_e_dT_p=1, dfca_h_dT_p=2, dmu_n_dT_p=-1, dmu_p_dT_p=-2,
-          dg0_dT=-2, dNtr_dT=2e15, Rt=2)  # need to clarify some of them
+dT_AlGaAs = dict(Eg_A=-5.41e-4, Eg_B=204, B_p=-1, C_Ea=0.1, fca_e_p=1, 
+                 fca_h_p=2, mu_n_p=-1, mu_p_p=-2, d_g0=-2, d_Ntr=2e15, Rt=2)
 
 
 # create Layer objects
@@ -65,3 +64,8 @@ pgrad2 = pcl.make_gradient_layer(pcont, 'gradient', 0.1e-4)
 # create design as a list of layers
 epi = EpiDesign([ncont, ngrad2, ncl, ngrad, nwg, act, pwg, pgrad, pcl,
                  pgrad2, pcont])
+
+# better do like this:
+# from ldsim.preprocessing.temperature import temperature_dependensies
+# ld.yin0 = calc_all_params(...)
+# dT = temperature_dependensies(DEFAULT_TEMPERATURE, ld.yin0, dT_AlGaAs)

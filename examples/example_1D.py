@@ -5,7 +5,7 @@ Calculate P-I and J-V curves for a laser diode with design described in
 
 import numpy as np
 import matplotlib.pyplot as plt
-from sample_design import epi, dT
+from sample_design import epi, dT_AlGaAs
 from ldsim import LaserDiode
 
 # export settings
@@ -13,7 +13,7 @@ export = True
 export_folder = 'results'
 
 # set up the problem
-ld = LaserDiode(epi=epi, dT=dT, L=3000e-4, w=100e-4, R1=0.95, R2=0.05,
+ld = LaserDiode(epi=epi, dT=dT_AlGaAs, L=3000e-4, w=100e-4, R1=0.95, R2=0.05,
                 lam=0.87e-4, ng=3.9, alpha_i=0.5, beta_sp=1e-4,
                 T_dependent=True)
 ld.gen_nonuniform_mesh(step_min=1e-7, step_max=20e-7, sigma=1e-5,
@@ -24,7 +24,7 @@ ld.solve_equilibrium()
 
 # arrays for storing results
 #voltages = np.arange(0, 2.51, 0.1)
-voltages = np.hstack([np.arange(0, 1.4, 0.025), np.arange(1.4, 1.65, 0.01)])
+voltages = np.hstack([np.arange(0, 1.45, 0.025), np.arange(1.45, 1.65, 0.01)])
 J_values = np.zeros_like(voltages)
 Jsrh_values = np.zeros_like(voltages)    # Shockley-Read-Hall
 Jrad_values = np.zeros_like(voltages)    # radiative

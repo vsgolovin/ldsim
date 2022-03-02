@@ -14,6 +14,7 @@ from scipy.interpolate import InterpolatedUnivariateSpline
 from scipy.linalg import solve_banded
 from scipy import sparse
 from ldsim.preprocessing import design, waveguide
+from ldsim.preprocessing.temperature import temperature_dependensies
 from ldsim import constants as const
 from ldsim import newton, units
 import ldsim.semicond as sc
@@ -224,7 +225,8 @@ class LaserDiode(object):
             self._calculate_param(p, 'b', inds, dx)
         if self.n_eff is not None:  # waveguide problem has been solved
             self._calc_wg_mode()
-        self.yin0 = deepcopy(self.yin)
+        yin0 = deepcopy(self.yin)
+        self.dT = temperature_dependensies(300, yin0, self.dT)
 
     def _calculate_param(self, p, nodes='internal', inds=None, dx=None):
         """
@@ -311,8 +313,6 @@ class LaserDiode(object):
         # arrays
         for key in self.yin:
             self.yin[key] /= units.dct[key]
-        for key in self.yin0: 
-            self.yin0[key] /= units.dct[key]
         for key in self.ybn:
             self.ybn[key] /= units.dct[key]
         if self.ndim == 1:
@@ -326,8 +326,10 @@ class LaserDiode(object):
         self.Sb /= units.n * units.x
         
         # temperature parameters
-        self.dT['dg0_dT'] /= units.dct['g0']
-        self.dT['dNtr_dT'] /= units.dct['N_tr']
+        for key in self.dT.T0_AlGaAs:
+            self.dT.T0_AlGaAs[key] /= units.dct[key] 
+        self.dT.dT_AlGaAs['d_g0'] /= units.dct['g0']
+        self.dT.dT_AlGaAs['d_Ntr'] /= units.dct['N_tr']
 
         self.is_dimensionless = True
 
@@ -361,8 +363,6 @@ class LaserDiode(object):
         # arrays
         for key in self.yin:
             self.yin[key] *= units.dct[key]
-        for key in self.yin0: 
-            self.yin0[key] *= units.dct[key]
         for key in self.ybn:
             self.ybn[key] *= units.dct[key]
         if self.ndim == 1:
@@ -376,8 +376,10 @@ class LaserDiode(object):
         self.Sf *= units.n * units.x
         
         # temperature parameters
-        self.dT['dg0_dT'] *= units.dct['g0']
-        self.dT['dNtr_dT'] *= units.dct['N_tr']
+        for key in self.dT.T0_AlGaAs:
+            self.dT.T0_AlGaAs[key] *= units.dct[key] 
+        self.dT.dT_AlGaAs['d_g0'] *= units.dct['g0']
+        self.dT.dT_AlGaAs['d_Ntr'] *= units.dct['N_tr']
 
         self.is_dimensionless = False
 
@@ -405,7 +407,7 @@ class LaserDiode(object):
         # self.sol -> self.sol2d
         self.sol2d = [dict() for _ in range(m)]
         for i in range(m):
-            for key in ('psi', 'phi_n', 'phi_p', 'n', 'p',
+            for key in ('T', 'V', 'psi', 'phi_n', 'phi_p', 'n', 'p',
                         'dn_dpsi', 'dn_dphin', 'dp_dpsi', 'dp_dphip'):
                 self.sol2d[i][key] = self.sol[key].copy()
         self.iterations = 0
@@ -482,7 +484,7 @@ class LaserDiode(object):
             Damping parameter.
 
         """
-        assert self.ndim == 1
+        #assert self.ndim == 1
         sol = self.gen_lcn_solver()
         sol.solve(maxiter, fluct, omega)
         if sol.fluct[-1]>fluct:
@@ -563,13 +565,12 @@ class LaserDiode(object):
         uniform disribution.
         """
         P = self.get_P()[0]
-        I = -self.get_I()
+        I = -self.get_I().mean()
         V = self.get_V()
         
         T = self.T_hs
         # !!! if choose bigger step in voltage instead 0.01 - breaks too
-        # another way: if P > 1e-4:
-        T += self.dT['Rt'] * (I*V - P)            
+        T += self.dT.Rt * (I*V - P)            
         
         return T
 
@@ -609,39 +610,34 @@ class LaserDiode(object):
             solutions = [self.sol]
         else:  # self.ndim == 2
             solutions = self.sol2d
+            
+        # temperature
         for sol in solutions:
-            # temperature
-            self.sol['T'] = self._calc_T()
-            dt = self.sol['T'] / self.T_hs
-            delta_t = self.sol['T'] - self.T_hs
-            self.Vt = self.Vt0 * dt
-            def expt(E): 
-                return (np.exp(E/self.Vt0 - E/self.Vt))
+            sol['T'] = self._calc_T()
+        self.Vt = self.Vt0 * sol['T'] / self.T_hs
             
-            # update parameters
-            self.yin['Nc'] = self.yin0['Nc'] * dt**(3/2)
-            self.yin['Nv'] = self.yin0['Nv'] * dt**(3/2)
-            self.yin['B'] = self.yin0['B'] * dt**self.dT['dB_dT_p']
-            self.yin['Cn'] = self.yin0['Cn'] * expt(self.dT['dC_dT_Ea'])
-            self.yin['Cp'] = self.yin0['Cp'] * expt(self.dT['dC_dT_Ea'])
-            self.yin['g0'] = self.yin0['g0'] + self.dT['dg0_dT'] * delta_t
-            self.yin['N_tr'] = self.yin0['N_tr'] + self.dT['dNtr_dT'] * delta_t
-            self.yin['fca_e'] = self.yin0['fca_e'] * dt**self.dT['dfca_e_dT_p']
-            self.yin['fca_h'] = self.yin0['fca_h'] * dt**self.dT['dfca_h_dT_p']
-            self.yin['mu_n'] = self.yin0['mu_n'] * dt**self.dT['dmu_n_dT_p']
-            self.yin['mu_p'] = self.yin0['mu_p'] * dt**self.dT['dmu_p_dT_p']
-            #self.yin['Eg'] = self.yin0['Eg'] + \
-            #    (self.dT['dEg_dT_A'] * self.sol['T']**2) / \
-            #        (self.sol['T'] + self.dT['dEg_dT_B'])
+        # update parameters
+        self.yin['Nc'] = self.dT.Nc(sol['T'])
+        self.yin['Nv'] = self.dT.Nv(sol['T'])
+        self.yin['B'] = self.dT.B(sol['T'])
+        self.yin['Cn'] = self.dT.Cn(sol['T'], self.Vt)
+        self.yin['Cp'] = self.dT.Cp(sol['T'], self.Vt)
+        self.yin['g0'] = self.dT.g0(sol['T'])
+        self.yin['N_tr'] = self.dT.Ntr(sol['T'])
+        self.yin['fca_e'] = self.dT.fca_e(sol['T'])
+        self.yin['fca_h'] = self.dT.fca_h(sol['T'])
+        self.yin['mu_n'] = self.dT.mu_n(sol['T'])
+        self.yin['mu_p'] = self.dT.mu_p(sol['T'])
+        self.yin['Eg'], self.yin['Ec'], self.yin['Ev'] = \
+            self.dT.Eg_AlGaAs(sol['T'])
             
-            # equilibrium carrier concentrations
-            #self.yin['psi_lcn'] = ...?
-            self.yin['n0'] = sc.n(psi=self.yin['psi_lcn'], phi_n=0,
-                                  Nc=self.yin['Nc'], Ec=self.yin['Ec'],
-                                  Vt=self.Vt)
-            self.yin['p0'] = sc.p(psi=self.yin['psi_lcn'], phi_p=0,
-                                  Nv=self.yin['Nv'], Ev=self.yin['Ev'],
-                                  Vt=self.Vt)
+        # equilibrium carrier concentrations
+        if self.iterations % 10 == 0:
+            self.solve_lcn()
+            sol = self.gen_equilibrium_solver()
+            sol.solve(100, 1e-8, 1)
+            self.yin['psi_bi'] = sol.x.copy()
+                
 
     # waveguide problem
     def solve_waveguide(self, step=1e-7, n_modes=3, remove_layers=(0, 0)):
@@ -1512,10 +1508,10 @@ class LaserDiode(object):
         "Get current through device (A)."
         if self.is_dimensionless:
             w = self.w * units.x
-            dz = self.dz * units.x
+            dz = self.L * units.x
         else:
             w = self.w
-            dz = self.dz
+            dz = self.L
         return self.get_J(discr) * w * dz
 
     def get_P(self):
@@ -1530,10 +1526,13 @@ class LaserDiode(object):
     
     def get_V(self):
         "Get applied bias"
-        if self.is_dimensionless:
-            V = self.sol['V'] * units.V  
-        else:
+        if self.ndim == 1:
             V = self.sol['V']
+        else:
+            sol = self.sol2d[0]
+            V = sol['V']
+        if self.is_dimensionless:
+            V *= units.V  
         return V
 
     def get_n_active(self):
