@@ -15,7 +15,7 @@ class LaserDiodeModel1d(LaserDiode):
     input_params_boundaries = ['Ev', 'Ec', 'Nc', 'Nv', 'mu_n', 'mu_p']
     params_active = ['g0', 'N_tr']
     calculated_params_nodes = [
-        'Vt', 'psi_lcn', 'n0', 'p0', 'psi_bi']
+        'Vt', 'psi_lcn', 'n0', 'p0', 'psi_bi', 'wg_mode']
     solution_arrays = ['psi', 'phi_n', 'phi_p', 'n', 'p']
 
     def __init__(self, *args, **kwargs):
@@ -43,6 +43,13 @@ class LaserDiodeModel1d(LaserDiode):
                                    v['Vt'])
         self.sol['p'] = semicond.p(s['psi'], s['phi_p'], v['Nv'], v['Ev'],
                                    v['Vt'])
+
+    def solve_waveguide(self, step=1e-7, n_modes=3, remove_layers=(0, 0)):
+        rv = super().solve_waveguide(step, n_modes, remove_layers)
+        if self.xn is not None:
+            self.vn['wg_mode'] = self.get_waveguide_mode(self.xn,
+                                                         self.is_dimensionless)
+        return rv
 
     def generate_nonuniform_mesh(self, step_uni=5e-8, step_min=1e-7,
                                  step_max=20e-7, sigma=100e-7,
@@ -87,6 +94,10 @@ class LaserDiodeModel1d(LaserDiode):
             self.vb[param] = self.calculate(
                 param, self.xb, z=0, inds=inds, dx=dx)
 
+        # waveguide mode
+        if self.gamma:  # not None -> calculated waveguide mode profile
+            self.vn['wg_mode'] = self.get_waveguide_mode(self.xn,
+                                                         self.is_dimensionless)
         self._update_Vt()
 
     def make_dimensionless(self):
