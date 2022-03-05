@@ -16,7 +16,9 @@ class LaserDiodeModel1d(LaserDiode):
     params_active = ['g0', 'N_tr']
     calculated_params_nodes = [
         'Vt', 'psi_lcn', 'n0', 'p0', 'psi_bi', 'wg_mode']
-    solution_arrays = ['psi', 'phi_n', 'phi_p', 'n', 'p']
+    solution_arrays = [
+        'psi', 'phi_n', 'phi_p', 'n', 'p', 'dn_dpsi', 'dn_dphin',
+        'dp_dpsi', 'dp_dphip']
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -37,12 +39,23 @@ class LaserDiodeModel1d(LaserDiode):
         self.vn['Vt'] = self.vn['T'] * self.kb
 
     def _update_densities(self):
-        s = self.sol
-        v = self.vn
-        self.sol['n'] = semicond.n(s['psi'], s['phi_n'], v['Nc'], v['Ec'],
-                                   v['Vt'])
-        self.sol['p'] = semicond.p(s['psi'], s['phi_p'], v['Nv'], v['Ev'],
-                                   v['Vt'])
+        # aliases (pointers)
+        psi = self.sol['psi']
+        phi_n = self.sol['phi_n']
+        phi_p = self.sol['phi_p']
+        Nc = self.vn['Nc']
+        Nv = self.vn['Nv']
+        Ec = self.vn['Ec']
+        Ev = self.vn['Ev']
+        Vt = self.vn['Vt']
+        # densities
+        self.sol['n'] = semicond.n(psi, phi_n, Ev, Ec, Vt)
+        self.sol['p'] = semicond.p(psi, phi_p, Nv, Ev, Vt)
+        # derivatives
+        self.sol['dn_dpsi'] = semicond.dn_dpsi(psi, phi_n, Nc, Ec, Vt)
+        self.sol['dn_dphin'] = semicond.dn_dphin(psi, phi_n, Nc, Ec, Vt)
+        self.sol['dp_dpsi'] = semicond.dp_dpsi(psi, phi_p, Nv, Ev, Vt)
+        self.sol['dp_dphip'] = semicond.dp_dphip(psi, phi_p, Nv, Ev, Vt)
 
     def solve_waveguide(self, step=1e-7, n_modes=3, remove_layers=(0, 0)):
         rv = super().solve_waveguide(step, n_modes, remove_layers)
