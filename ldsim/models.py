@@ -5,6 +5,7 @@ from ldsim.preprocessing.design import LaserDiode
 from ldsim.mesh import generate_nonuniform_mesh
 from ldsim import units, newton, semicond
 import ldsim.semicond.equilibrium as eq
+from ldsim.transport import flux
 
 
 class LaserDiodeModel1d(LaserDiode):
@@ -16,6 +17,9 @@ class LaserDiodeModel1d(LaserDiode):
     params_active = ['g0', 'N_tr']
     calculated_params_nodes = [
         'Vt', 'psi_lcn', 'n0', 'p0', 'psi_bi', 'wg_mode']
+    calculated_params_boundaries = [
+        'jn', 'djn_dpsi1', 'djn_dpsi2', 'djn_dphin1', 'djn_dphin2',
+        'jp', 'djp_dpsi1', 'djp_dpsi2', 'djp_dphip1', 'djp_dphip2']
     solution_arrays = [
         'psi', 'phi_n', 'phi_p', 'n', 'p', 'dn_dpsi', 'dn_dphin',
         'dp_dpsi', 'dp_dphip']
@@ -31,12 +35,200 @@ class LaserDiodeModel1d(LaserDiode):
         # parameters at mesh nodes and volume boundaries
         self.vn = dict.fromkeys(self.input_params_nodes
                                 + self.calculated_params_nodes)
-        self.vb = dict.fromkeys(self.input_params_boundaries)
+        self.vb = dict.fromkeys(self.input_params_boundaries
+                                + self.calculated_params_boundaries)
         self.sol = dict.fromkeys(self.solution_arrays)
         self.S = 1e-12
+        self.iterations = None
+        self.fluct = None
+        self.voltage = 0.0
+
+        # current density discretization scheme
+        self.j_discr = 'mSG'
 
     def _update_Vt(self):
         self.vn['Vt'] = self.vn['T'] * self.kb
+
+    def _update_current_densities(self):
+        psi = self.sol['psi']
+        Vt = self.vn['Vt']
+        B_plus = flux.bernoulli((psi[1:] - psi[:-1]) / Vt)
+        B_minus = flux.bernoulli(-(psi[1:] - psi[:-1]) / Vt)
+        Bdot_plus = flux.bernoulli_dot((psi[1:] - psi[:-1]) / Vt)
+        Bdot_minus = flux.bernoulli_dot(-(psi[1:] - psi[:-1]) / Vt)
+        h = self.xn[1:] - self.xn[:-1]
+
+        if self.j_discr == 'mSG':
+            jn_function = self._jn_mSG
+            jp_function = self._jp_mSG
+        else:
+            assert self.j_discr == 'SG'
+            jn_function = self._jn_SG
+            jp_function = self._jp_SG
+        jn, djn_dpsi1, djn_dpsi2, djn_dphin1, djn_dphin2 = jn_function(
+            B_plus, B_minus, Bdot_plus, Bdot_minus, h
+        )
+        jp, djp_dpsi1, djp_dpsi2, djp_dphip1, djp_dphip2 = jp_function(
+            B_plus, B_minus, Bdot_plus, Bdot_minus, h
+        )
+        self.vb['jn'] = jn
+        self.vb['djn_dpsi1'] = djn_dpsi1
+        self.vb['djn_dpsi2'] = djn_dpsi2
+        self.vb['djn_dphin1'] = djn_dphin1
+        self.vb['djn_dphin2'] = djn_dphin2
+        self.vb['jp'] = jp
+        self.vb['djp_dpsi1'] = djp_dpsi1
+        self.vb['djp_dpsi2'] = djp_dpsi2
+        self.vb['djp_dphip1'] = djp_dphip1
+        self.vb['djp_dphip2'] = djp_dphip2
+
+    def _jn_SG(self, B_plus, B_minus, Bdot_plus, Bdot_minus, h):
+        "Electron current density, Scharfetter-Gummel scheme."
+        psi = self.sol['psi']
+        phi_n = self.sol['phi_n']
+        Nc = self.vb['Nc']
+        Ec = self.vb['Ec']
+        Vt = self.vn['Vt']
+        mu_n = self.vb['mu_n']
+        q = self.q
+
+        # electron densities at finite volume boundaries
+        n1 = semicond.n(psi[:-1], phi_n[:-1], Nc, Ec, Vt[:-1])
+        n2 = semicond.n(psi[1:], phi_n[1:], Nc, Ec, Vt[1:])
+
+        # forward (2-2) and backward (1-1) derivatives w.r.t. potentials
+        dn1_dpsi1 = semicond.dn_dpsi(psi[:-1], phi_n[:-1], Nc, Ec, Vt[:-1])
+        dn2_dpsi2 = semicond.dn_dpsi(psi[1:], phi_n[1:], Nc, Ec, Vt[1:])
+        dn1_dphin1 = semicond.dn_dphin(psi[:-1], phi_n[:-1], Nc, Ec, Vt[:-1])
+        dn2_dphin2 = semicond.dn_dphin(psi[1:], phi_n[1:], Nc, Ec, Vt[1:])
+
+        # electron current density and its derivatives
+        jn = flux.SG_jn(n1, n2, B_plus, B_minus, h)
+        djn_dpsi1 = flux.SG_djn_dpsi1(n1, n2, dn1_dpsi1, B_minus, Bdot_plus,
+                                      Bdot_minus, h, Vt, q, mu_n)
+        djn_dpsi2 = flux.SG_djn_dpsi2(n1, n2, dn2_dpsi2, B_plus, Bdot_plus,
+                                      Bdot_minus, h, Vt, q, mu_n)
+        djn_dphin1 = flux.SG_djn_dphin1(dn1_dphin1, B_minus, h, Vt, q, mu_n)
+        djn_dphin2 = flux.SG_djn_dphin2(dn2_dphin2, B_plus, h, Vt, q, mu_n)
+        return jn, djn_dpsi1, djn_dpsi2, djn_dphin1, djn_dphin2
+
+    def _jp_SG(self, B_plus, B_minus, Bdot_plus, Bdot_minus, h):
+        "Hole current density, Scharfetter-Gummel scheme."
+        psi = self.sol['psi']
+        phi_p = self.sol['phi_p']
+        Nv = self.vb['Nv']
+        Ev = self.vb['Ev']
+        Vt = self.vn['Vt']
+        mu_p = self.vb['mu_p']
+        q = self.q
+
+        # hole densities at finite bolume boundaries
+        p1 = semicond.p(psi[:-1], phi_p[:-1], Nv, Ev, Vt[:-1])
+        p2 = semicond.p(psi[1:], phi_p[1:], Nv, Ev, Vt[1:])
+
+        # forward (2-2) and backward derivatives w.r.t. potentials
+        dp1_dpsi1 = semicond.dp_dpsi(psi[:-1], phi_p[:-1], Nv, Ev, Vt[:-1])
+        dp2_dpsi2 = semicond.dp_dpsi(psi[1:], phi_p[1:], Nv, Ev, Vt[1:])
+        dp1_dphip1 = semicond.dp_dphip(psi[:-1], phi_p[:-1], Nv, Ev, Vt[:-1])
+        dp2_dphip2 = semicond.dp_dphip(psi[1:], phi_p[1:], Nv, Ev, Vt[1:])
+
+        # hole current density and its derivatives
+        jp = flux.SG_jp(p1, p2, B_plus, B_minus, h, Vt, q, mu_p)
+        djp_dpsi1 = flux.SG_djp_dpsi1(p1, p2, dp1_dpsi1, B_plus, Bdot_plus,
+                                      Bdot_minus, h, Vt, q, mu_p)
+        djp_dpsi2 = flux.SG_djp_dpsi2(p1, p2, dp2_dpsi2, B_minus, Bdot_plus,
+                                      Bdot_minus, h, Vt, q, mu_p)
+        djp_dphip1 = flux.SG_djp_dphip1(dp1_dphip1, B_plus, h, Vt, q, mu_p)
+        djp_dphip2 = flux.SG_djp_dphip2(dp2_dphip2, B_minus, h, Vt, q, mu_p)
+        return jp, djp_dpsi1, djp_dpsi2, djp_dphip1, djp_dphip2
+
+    def _jn_mSG(self, B_plus, B_minus, Bdot_plus, Bdot_minus, h):
+        "Electron current density, modified Scharfetter-Gummel scheme."
+        # aliases
+        psi = self.sol['psi']
+        phi_n = self.sol['phi_n']
+        Nc = self.vb['Nc']
+        Ec = self.vb['Ec']
+        Vt = self.vn['Vt']
+        mu_n = self.vb['mu_n']
+        q = self.q
+        F = semicond.prob_functions.fermi_approx
+        F_dot = semicond.prob_functions.fermi_dot_approx
+
+        # electron current density
+        eta_n1 = (psi[:-1] - phi_n[:-1] - Ec) / Vt[:-1]
+        eta_n2 = (psi[1:] - phi_n[1:] - Ec) / Vt[1:]
+        exp_eta_n1 = np.exp(eta_n1)
+        exp_eta_n2 = np.exp(eta_n2)
+        gn = flux.g(eta_n1, eta_n2, F)
+        jn_SG = flux.oSG_jn(exp_eta_n1, exp_eta_n2, B_plus, B_minus, h, Nc,
+                            Vt, q, mu_n)
+        jn = jn_SG * gn
+
+        # derivatives
+        gdot_n1 = flux.gdot(gn, eta_n1, F, F_dot) / Vt[:-1]
+        gdot_n2 = flux.gdot(gn, eta_n2, F, F_dot) / Vt[1:]
+        djn_dpsi1_SG = flux.oSG_djn_dpsi1(
+            exp_eta_n1, exp_eta_n2, B_minus, Bdot_plus, Bdot_minus,
+            h, Nc, q, mu_n
+        )
+        djn_dpsi1 = flux.mSG_jdot(jn_SG, djn_dpsi1_SG, gn, gdot_n1)
+        djn_dpsi2_SG = flux.oSG_djn_dpsi2(
+            exp_eta_n1, exp_eta_n2, B_plus, Bdot_plus, Bdot_minus,
+            h, Nc, q, mu_n
+        )
+        djn_dpsi2 = flux.mSG_jdot(jn_SG, djn_dpsi2_SG, gn, gdot_n2)
+        djn_dphin1_SG = flux.oSG_djn_dphin1(exp_eta_n1, B_minus, h,
+                                            Nc, q, mu_n)
+        djn_dphin1 = flux.mSG_jdot(jn_SG, djn_dphin1_SG, gn, -gdot_n1)
+        djn_dphin2_SG = flux.oSG_djn_dphin2(exp_eta_n2, B_plus, h,
+                                            Nc, q, mu_n)
+        djn_dphin2 = flux.mSG_jdot(jn_SG, djn_dphin2_SG, gn, -gdot_n2)
+        return jn, djn_dpsi1, djn_dpsi2, djn_dphin1, djn_dphin2
+
+    def _jp_mSG(self, B_plus, B_minus, Bdot_plus, Bdot_minus, h):
+        "Hole current density, modified Scharfetter-Gummel scheme."
+        # aliases
+        psi = self.sol['psi']
+        phi_p = self.sol['phi_p']
+        Nv = self.vb['Nv']
+        Ev = self.vb['Ev']
+        Vt = self.vn['Vt']
+        mu_p = self.vb['mu_p']
+        q = self.q
+        F = semicond.prob_functions.fermi_approx
+        F_dot = semicond.prob_functions.fermi_dot_approx
+
+        # hole current density
+        eta_1 = (-psi[:-1] + phi_p[:-1] + Ev) / Vt[:-1]
+        eta_2 = (-psi[1:] + phi_p[1:] + Ev) / Vt[1:]
+        exp_eta_p1 = np.exp(eta_1)
+        exp_eta_p2 = np.exp(eta_2)
+        gp = flux.g(eta_1, eta_2, F)
+        jp_SG = flux.osG_jp(exp_eta_p1, exp_eta_p2, B_plus, B_minus,
+                            h, Nv, q, mu_p)
+        jp = jp_SG * gp
+
+        # derivatives
+        gdot_p1 = flux.gdot(gp, eta_1, F, F_dot) / Vt[:-1]
+        gdot_p2 = flux.gdot(gp, eta_2, F, F_dot) / Vt[1:]
+        djp_dpsi1_SG = flux.oSG_djp_dpsi(
+            exp_eta_p1, exp_eta_p2, B_plus, Bdot_plus, Bdot_minus,
+            h, Nv, q, mu_p
+        )
+        djp_dpsi1 = flux.mSG_jdot(jp_SG, djp_dpsi1_SG, gp, -gdot_p1)
+        djp_dpsi2_SG = flux.oSG_djp_dpsi2(
+            exp_eta_p1, exp_eta_p2, B_minus, Bdot_plus, Bdot_minus,
+            h, Nv, q, mu_p
+        )
+        djp_dpsi2 = flux.mSG_jdot(jp_SG, djp_dpsi2_SG, gp, -gdot_p2)
+        djp_dphip1_SG = flux.oSG_djp_dphip1(exp_eta_p1, B_plus,
+                                            h, Nv, q, mu_p)
+        djp_dphip1 = flux.mSG_jdot(jp_SG, djp_dphip1_SG, gp, gdot_p1)
+        djp_dphip2_SG = flux.oSG_djp_dphip2(exp_eta_p2, B_minus,
+                                            h, Nv, q, mu_p)
+        djp_dphip2 = flux.mSG_jdot(jp_SG, djp_dphip2_SG, gp, gdot_p2)
+        return jp, djp_dpsi1, djp_dpsi2, djp_dphip1, djp_dphip2
 
     def _update_densities(self):
         # aliases (pointers)
@@ -119,7 +311,7 @@ class LaserDiodeModel1d(LaserDiode):
         self.xb /= units.x
         for d in (self.vn, self.vb, self.sol):
             for param in d:
-                if d[param] is not None:
+                if d[param] is not None and param in units.dct:
                     d[param] /= units.dct[param]
         return super().make_dimensionless()
 
@@ -255,3 +447,26 @@ class LaserDiodeModel1d(LaserDiode):
         self.sol['phi_n'] = np.zeros_like(sol.x)
         self.sol['phi_p'] = np.zeros_like(sol.x)
         self._update_densities()
+
+    # nonequilibrium drift-diffusion
+    def apply_voltage(self, V):
+        """
+        Modify current solution so that boundary conditions at external
+        voltage `V` are satisfied.
+        """
+        # scale voltage
+        if self.is_dimensionless:
+            V /= units.V
+
+        # apply boundary conditions
+        self.sol['psi'][0] = self.vn['psi_bi'][0] - V / 2
+        self.sol['psi'][-1] = self.vn['psi_bi'][-1] + V / 2
+        for phi in ('phi_n', 'phi_p'):
+            self.sol[phi][0] = -V / 2
+            self.sol[phi][-1] = V / 2
+        # carrier densities at boundaries should not change
+
+        # track solution convergence
+        self.iterations = 0
+        self.fluct = []  # fluctuation for every Newton iteration
+        self.voltage = V
