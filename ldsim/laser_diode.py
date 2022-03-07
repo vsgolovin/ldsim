@@ -570,7 +570,7 @@ class LaserDiode(object):
         
         T = self.T_hs
         # !!! if choose bigger step in voltage instead 0.01 - breaks too
-        T += self.dT.Rt * (I*V - P)            
+        T += self.dT.Rt * (I*V - P)          
         
         return T
 
@@ -760,25 +760,31 @@ class LaserDiode(object):
         # solve the system
         assert self.ndim == 1
         m = self.mx - 2
-        data, diags, rvec = self._transport_system(discr)
-        J = sparse.spdiags(data=data, diags=diags, m=m*3, n=m*3,
-                           format='csc')
-        dx = sparse.linalg.spsolve(J, -rvec)
+        
+        delta_T = 1
+        while delta_T > 1e-8:
+            T_prev = self.sol['T']
+            
+            data, diags, rvec = self._transport_system(discr)
+            J = sparse.spdiags(data=data, diags=diags, m=m*3, n=m*3,
+                               format='csc')
+            dx = sparse.linalg.spsolve(J, -rvec)
 
-        # calculate and save fluctuation
-        x = np.concatenate((self.sol['psi'][1:-1],
-                            self.sol['phi_n'][1:-1],
-                            self.sol['phi_p'][1:-1]))
-        fluct = newton.l2_norm(dx) / newton.l2_norm(x)
-        self.fluct.append(fluct)
+            # calculate and save fluctuation
+            x = np.concatenate((self.sol['psi'][1:-1],
+                                self.sol['phi_n'][1:-1],
+                                self.sol['phi_p'][1:-1]))
+            fluct = newton.l2_norm(dx) / newton.l2_norm(x)
+            self.fluct.append(fluct)
 
-        # update current solution (potentials and densities)
-        self.sol['psi'][1:-1] += dx[:m] * omega
-        self.sol['phi_n'][1:-1] += dx[m:2*m] * omega
-        self.sol['phi_p'][1:-1] += dx[2*m:] * omega
-        if self.T_dependent: 
-            self._update_temperature()
-        self._update_densities()
+            # update current solution (potentials and densities)
+            self.sol['psi'][1:-1] += dx[:m] * omega
+            self.sol['phi_n'][1:-1] += dx[m:2*m] * omega
+            self.sol['phi_p'][1:-1] += dx[2*m:] * omega
+            if self.T_dependent: 
+                self._update_temperature()
+            self._update_densities()
+            delta_T = T_prev - self.sol['T']
 
         return fluct
 
@@ -808,66 +814,76 @@ class LaserDiode(object):
             Solution fluctuation, i.e. ratio of `dx` and `x` L2 norms.
 
         """
-        # residual vector and Jacobian for transport problem
-        if self.ndim == 1:
-            J, rvec = self._lasing_system_1D(discr)
-        else:
-            J, rvec = self._lasing_system_2D(discr)
-
-        # solve the system
-        dx = sparse.linalg.spsolve(J, -rvec)
         mx = self.nx - 2
         mz = self.mz
-        if self.ndim == 1:
-            x = np.concatenate((self.sol['psi'][1:-1],
-                                self.sol['phi_n'][1:-1],
-                                self.sol['phi_p'][1:-1],
-                                np.array([self.sol['S']])))
-        else:  # 2D
-            x = np.zeros(3*mx*mz + 2*mz)
-            for k in range(mz):
-                xk = x[3*mx*k:3*mx*(k+1)]
-                sol = self.sol2d[k]
-                xk[:mx] = sol['psi'][1:-1]
-                xk[mx:2*mx] = sol['phi_n'][1:-1]
-                xk[2*mx:3*mx] = sol['phi_p'][1:-1]
-            x[-2*mz:-mz] = self.Sb[:-1]
-            x[-mz:] = self.Sf[1:]
-        fluct = newton.l2_norm(dx) / newton.l2_norm(x)
-        self.fluct.append(fluct)
-        self.iterations += 1
-
-        # update solution
-        if self.ndim == 1:
-            self.sol['psi'][1:-1] += dx[:mx]*omega
-            self.sol['phi_n'][1:-1] += dx[mx:2*mx]*omega
-            self.sol['phi_p'][1:-1] += dx[2*mx:3*mx]*omega
-            if self.T_dependent: 
-                self._update_temperature()
-            self._update_densities()
-            if dx[-1] > 0:
-                self.sol['S'] += dx[-1] * omega_S[0]
+        
+        delta_T = 1
+        while delta_T > 1e-8:
+        
+            # residual vector and Jacobian for transport problem
+            if self.ndim == 1:
+                T_prev = self.sol['T']
+                J, rvec = self._lasing_system_1D(discr)
             else:
-                self.sol['S'] += dx[-1] * omega_S[1]
-            self._update_Sb_Sf_1D()
-        else:
-            for k in range(self.mz):
-                sol = self.sol2d[k]
-                dxk = dx[3*mx*k:3*mx*(k+1)]
-                sol['psi'][1:-1] += dxk[:mx] * omega
-                sol['phi_n'][1:-1] += dxk[mx:2*mx] * omega
-                sol['phi_p'][1:-1] += dxk[2*mx:3*mx] * omega
-            if self.T_dependent: 
-                self._update_temperature()
-            self._update_densities()
-            dx_S = dx[-2*mz:]
-            ix = (dx_S[:mz] > 0)
-            self.Sb[:-1][ix] += dx_S[:mz][ix] * omega_S[0]
-            self.Sb[:-1][~ix] += dx_S[:mz][~ix] * omega_S[1]
-            self.Sf[0] = self.Sb[0] * self.R1
-            self.Sf[1:][ix] += dx_S[mz:][ix] * omega_S[0]
-            self.Sf[1:][~ix] += dx_S[mz:][~ix] * omega_S[1]
-            self.Sb[-1] = self.Sf[-1] * self.R2
+                T_prev = self.sol2d[0]['T']
+                J, rvec = self._lasing_system_2D(discr)
+
+            # solve the system
+            dx = sparse.linalg.spsolve(J, -rvec)
+            if self.ndim == 1:
+                x = np.concatenate((self.sol['psi'][1:-1],
+                                    self.sol['phi_n'][1:-1],
+                                    self.sol['phi_p'][1:-1],
+                                    np.array([self.sol['S']])))
+            else:  # 2D
+                x = np.zeros(3*mx*mz + 2*mz)
+                for k in range(mz):
+                    xk = x[3*mx*k:3*mx*(k+1)]
+                    sol = self.sol2d[k]
+                    xk[:mx] = sol['psi'][1:-1]
+                    xk[mx:2*mx] = sol['phi_n'][1:-1]
+                    xk[2*mx:3*mx] = sol['phi_p'][1:-1]
+                x[-2*mz:-mz] = self.Sb[:-1]
+                x[-mz:] = self.Sf[1:]
+            fluct = newton.l2_norm(dx) / newton.l2_norm(x)            
+            self.fluct.append(fluct)
+            self.iterations += 1
+            
+            assert fluct < 10., 'Convergency breaks! For check: -ld.get_I()'
+
+            # update solution
+            if self.ndim == 1:
+                self.sol['psi'][1:-1] += dx[:mx]*omega
+                self.sol['phi_n'][1:-1] += dx[mx:2*mx]*omega
+                self.sol['phi_p'][1:-1] += dx[2*mx:3*mx]*omega
+                if self.T_dependent: 
+                    self._update_temperature()
+                self._update_densities()
+                if dx[-1] > 0:
+                    self.sol['S'] += dx[-1] * omega_S[0]
+                else:
+                    self.sol['S'] += dx[-1] * omega_S[1]
+                self._update_Sb_Sf_1D()
+                delta_T = T_prev - self.sol['T']
+            else:
+                for k in range(self.mz):
+                    sol = self.sol2d[k]
+                    dxk = dx[3*mx*k:3*mx*(k+1)]
+                    sol['psi'][1:-1] += dxk[:mx] * omega
+                    sol['phi_n'][1:-1] += dxk[mx:2*mx] * omega
+                    sol['phi_p'][1:-1] += dxk[2*mx:3*mx] * omega
+                if self.T_dependent: 
+                    self._update_temperature()
+                self._update_densities()
+                dx_S = dx[-2*mz:]
+                ix = (dx_S[:mz] > 0)
+                self.Sb[:-1][ix] += dx_S[:mz][ix] * omega_S[0]
+                self.Sb[:-1][~ix] += dx_S[:mz][~ix] * omega_S[1]
+                self.Sf[0] = self.Sb[0] * self.R1
+                self.Sf[1:][ix] += dx_S[mz:][ix] * omega_S[0]
+                self.Sf[1:][~ix] += dx_S[mz:][~ix] * omega_S[1]
+                self.Sb[-1] = self.Sf[-1] * self.R2
+                delta_T = T_prev - self.sol2d[0]['T']
 
         return fluct
 

@@ -24,7 +24,7 @@ ld.solve_equilibrium()
 
 # arrays for storing results
 #voltages = np.arange(0, 2.51, 0.1)
-voltages = np.hstack([np.arange(0, 1.45, 0.025), np.arange(1.45, 1.65, 0.01)])
+voltages = np.hstack([np.arange(0, 1.4, 0.025), np.arange(1.4, 1.65, 0.01)])
 J_values = np.zeros_like(voltages)
 Jsrh_values = np.zeros_like(voltages)    # Shockley-Read-Hall
 Jrad_values = np.zeros_like(voltages)    # radiative
@@ -41,7 +41,7 @@ for i, v in enumerate(voltages):
     # track convergence with fluctuation
     # i.e., ratio of update vector and solution L2 norms
     fluct = 1  # initial value
-    while fluct > 5e-8:  # perform Newton's method iterations
+    while fluct > 1e-8:  # perform Newton's method iterations
         # choose value of damping parameter `omega`
         # depending on fluctuation
         if fluct > 1e-3:
