@@ -5,6 +5,7 @@ from ldsim.preprocessing.design import LaserDiode
 from ldsim.mesh import generate_nonuniform_mesh
 from ldsim import units, newton, semicond
 import ldsim.semicond.equilibrium as eq
+import ldsim.semicond.recombination as rec
 from ldsim.transport import flux
 
 
@@ -16,7 +17,10 @@ class LaserDiodeModel1d(LaserDiode):
     input_params_boundaries = ['Ev', 'Ec', 'Nc', 'Nv', 'mu_n', 'mu_p']
     params_active = ['g0', 'N_tr']
     calculated_params_nodes = [
-        'Vt', 'psi_lcn', 'n0', 'p0', 'psi_bi', 'wg_mode']
+        'Vt', 'psi_lcn', 'n0', 'p0', 'psi_bi', 'wg_mode',
+        'R_srh', 'dRsrh_dpsi', 'dRsrh_dphin', 'dRsrh_dphip',
+        'R_rad', 'dRrad_dpsi', 'dRrad_dphin', 'dRrad_dphip',
+        'R_aug', 'dRrad_dpsi', 'dRaug_dphin', 'dRaug_dphip']
     calculated_params_boundaries = [
         'jn', 'djn_dpsi1', 'djn_dpsi2', 'djn_dphin1', 'djn_dphin2',
         'jp', 'djp_dpsi1', 'djp_dpsi2', 'djp_dphip1', 'djp_dphip2']
@@ -229,6 +233,53 @@ class LaserDiodeModel1d(LaserDiode):
                                             h, Nv, q, mu_p)
         djp_dphip2 = flux.mSG_jdot(jp_SG, djp_dphip2_SG, gp, gdot_p2)
         return jp, djp_dpsi1, djp_dpsi2, djp_dphip1, djp_dphip2
+
+    def _update_recombination_rates(self):
+        """
+        Calculate recombination (Shockley-Read-Hall, radiative and Auger)
+        rates, as well as their derivatives w.r.t. potentials.
+        """
+        # aliases
+        n = self.sol['n']
+        dn_dpsi = self.sol['dn_dpsi']
+        dn_dphin = self.sol['dn_dphin']
+        p = self.sol['p']
+        dp_dpsi = self.sol['dp_dpsi']
+        dp_dphip = self.sol['dp_dphip']
+        n0 = self.vn['n0']
+        p0 = self.vn['p0']
+        B = self.vn['B']
+
+        # Shockley-Read-Hall recombination
+        self.vn['R_srh'] = rec.srh_R(
+            n, p, n0, p0, self.vn['tau_n'], self.vn['tau_p']
+        )
+        self.vn['dRsrh_dpsi'] = rec.srh_Rdot(
+            n, dn_dpsi, p, dp_dpsi, n0, p0, self.vn['tau_n'], self.vn['tau_p']
+        )
+        self.vn['dRsrh_dphin'] = rec.srh_Rdot(
+            n, dn_dphin, p, 0, n0, p0, self.vn['tau_n'], self.vn['tau_p']
+        )
+        self.vn['dRsrh_dphip'] = rec.srh_Rdot(
+            n, 0, p, dp_dphip, n0, p0, self.vn['tau_n'], self.vn['tau_p']
+        )
+
+        # radiative recombination
+        self.vn['R_rad'] = rec.rad_R(n, p, n0, p, B)
+        self.vn['dRrad_dpsi'] = rec.rad_Rdot(n, dn_dpsi, p, dp_dpsi, B)
+        self.vn['dRrad_dphin'] = rec.rad_Rdot(n, dn_dphin, p, 0, B)
+        self.vn['dRrad_dphip'] = rec.rad_Rdot(n, 0, p, dp_dphip, B)
+
+        # Auger recombination
+        self.vn['R_aug'] = rec.auger_R(
+            n, p, n0, p0, self.vn['Cn'], self.vn['Cp']
+        )
+        self.vn['dRaug_dpsi'] = rec.auger_Rdot(
+            n, dn_dpsi, p, dp_dpsi, n0, p0, self.vn['Cn'], self.vn['Cp']
+        )
+        self.vn['dRaug_dphin'] = rec.auger_Rdot(
+            n, dn_dphin, p, 0, n0, p0, self.vn['Cn'], self.vn['Cp']
+        )
 
     def _update_densities(self):
         # aliases (pointers)
