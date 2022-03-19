@@ -181,6 +181,7 @@ class LaserDiode:
         self.R2 = R2
         self.lam = lam
         self.ng = ng
+        self.vg = const.c / self.ng
         self.alpha_i = alpha_i
         self.beta_sp = beta_sp
 
@@ -206,6 +207,7 @@ class LaserDiode:
         self.L /= units.x
         self.w /= units.x
         self.lam /= units.x
+        self.vg /= units.x / units.t
         self.alpha_i /= 1 / units.x
         self.alpha_m /= 1 / units.x
         self.photon_energy /= units.E
@@ -221,6 +223,7 @@ class LaserDiode:
         self.L *= units.x
         self.w *= units.x
         self.lam *= units.x
+        self.vg *= units.x / units.t
         self.alpha_i *= 1 / units.x
         self.alpha_m *= 1 / units.x
         self.photon_energy *= units.E

@@ -23,7 +23,8 @@ class LaserDiodeModel1d(LaserDiode):
         'R_srh', 'dRsrh_dpsi', 'dRsrh_dphin', 'dRsrh_dphip',
         'R_rad', 'dRrad_dpsi', 'dRrad_dphin', 'dRrad_dphip',
         'R_aug', 'dRrad_dpsi', 'dRaug_dphin', 'dRaug_dphip',
-        'gain', 'dg_dpsi', 'dg_dphin', 'dg_dphip']
+        'gain', 'dg_dpsi', 'dg_dphin', 'dg_dphip', 'fca',
+        'R_st', 'dRst_dpsi', 'dRst_dphin', 'dRst_dphip', 'dRst_dS']
     calculated_params_boundaries = [
         'Vt',
         'jn', 'djn_dpsi1', 'djn_dpsi2', 'djn_dphin1', 'djn_dphin2',
@@ -47,6 +48,8 @@ class LaserDiodeModel1d(LaserDiode):
                                 + self.calculated_params_boundaries)
         self.sol = dict.fromkeys(self.solution_arrays)
         self.S = 1e-12
+        self.alpha_fca = 0.0
+        self.Gain = 0.0
         self.iterations = None
         self.fluct = None
         self.voltage = 0.0
@@ -308,6 +311,23 @@ class LaserDiodeModel1d(LaserDiode):
         self.vn['dg_dphin'] = dg_dn * self.sol['dn_dphin'][self.ar_ix]
         self.vn['dg_dphip'] = dg_dp * self.sol['dp_dphip'][self.ar_ix]
 
+        # calculate stimulated recombination rate and its derivatives
+        dx = self.xb[1:] - self.xb[:-1]
+        T = self.vn['wg_mode']
+        k = self.vg * dx[self.ar_ix[1:-1]] * T[self.ar_ix]
+        self.vn['R_st'] = k * gain * self.S
+        self.vn['dRst_dpsi'] = k * self.vn['dg_dpsi'] * self.S
+        self.vn['dRst_dphin'] = k * self.vn['dg_dphin'] * self.S
+        self.vn['dRst_dphip'] = k * self.vn['dg_dphip'] * self.S
+        self.vn['dRst_dS'] = k * gain
+
+        # free-carrier absorption
+        self.vn['fca'] = (self.sol['n'] * self.vn['fca_e']
+                          + self.sol['p'] * self.vn['fca_h']) * T
+        self.alpha_fca = np.sum(self.vn['fca'][1:-1] * dx)
+        self.Gain = np.sum(self.vn['gain'] * T[self.ar_ix]
+                           * dx[self.ar_ix[1:-1]])
+
     def _transport_system(self):
         m = len(self.xn) - 2            # number of inner nodes
         h = self.xn[1:] - self.xn[:-1]  # mesh steps
@@ -377,7 +397,7 @@ class LaserDiodeModel1d(LaserDiode):
         data[9,    :m  ] = j31[1]
         data[10,   :m  ] = j31[2]
 
-        # assemble sparse matrix
+        # indices of diagonals (values stored in `data`)
         diags = [2*m, m, 1, 0, -1, -m+1, -m, -m-1, -2*m+1, -2*m, -2*m-1]
 
         return data, diags, residuals
@@ -388,7 +408,22 @@ class LaserDiodeModel1d(LaserDiode):
         #  photon density rate equation]
         residuals = np.empty(m * 3 + 1)  # [poisson, electron current]
         data, diags, residuals[:-1] = self._transport_system()
-        pass
+
+        # update vector of residuals
+        inds = np.where(self.ar_ix)[0] - 1
+        net_gain = self.Gain - self.alpha_i - self.alpha_m - self.alpha_fca
+        R_rad_ar_int = np.sum(
+            self.vn['R_rad'][self.ar_ix]
+            * (self.xb[1:] - self.xb[:-1])[self.ar_ix[1:-1]]
+            * self.vn['wg_mode'][self.ar_ix]
+        )
+        residuals[m + inds] += self.q * self.vn['R_st']
+        residuals[2 * m + inds] += -self.q * self.vn['R_st']
+        residuals[-1] = (self.vg * net_gain * self.S
+                         + self.beta_sp * R_rad_ar_int)
+
+        # TODO: construct Jacobian
+        raise NotImplementedError
 
     def _update_densities(self):
         # aliases (pointers)
@@ -469,6 +504,9 @@ class LaserDiodeModel1d(LaserDiode):
         "Make every parameter dimensionless."
         self.xn /= units.x
         self.xb /= units.x
+        self.S /= units.dct['S']
+        self.alpha_fca /= 1 / units.x
+        self.Gain /= 1 / units.x
         for d in (self.vn, self.vb, self.sol):
             for param in d:
                 if d[param] is not None and param in units.dct:
@@ -479,6 +517,9 @@ class LaserDiodeModel1d(LaserDiode):
         "Convert all values back to original units."
         self.xn *= units.x
         self.xb *= units.x
+        self.S *= units.dct['S']
+        self.alpha_fca *= 1 / units.x
+        self.Gain *= 1 / units.x
         for d in (self.vn, self.vb, self.sol):
             for param in d:
                 if d[param] is not None and param in units.dct:
