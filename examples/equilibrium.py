@@ -9,8 +9,8 @@ ld = LaserDiodeModel1d(layers, L=0.3, w=0.01, R1=0.95, R2=0.05, lam=0.87e-4,
 ld.generate_nonuniform_mesh(y_ext=[0., 0.])
 mode = ld.solve_waveguide()
 
-# find electrostatic potential and carrier densities corresponding to local
-# local charge neutrality (LCN)
+# find electrostatic potential and carrier densities corresponding
+# to local charge neutrality (LCN)
 ld.make_dimensionless()
 ld.solve_lcn()
 ld.original_units()
