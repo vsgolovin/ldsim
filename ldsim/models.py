@@ -7,6 +7,7 @@ from ldsim.mesh import generate_nonuniform_mesh
 from ldsim import units, newton, semicond
 import ldsim.semicond.equilibrium as eq
 import ldsim.semicond.recombination as rec
+from ldsim.semicond.gain import gain_2p
 from ldsim.transport import flux, vrs
 
 
@@ -21,7 +22,8 @@ class LaserDiodeModel1d(LaserDiode):
         'Vt', 'psi_lcn', 'n0', 'p0', 'psi_bi', 'wg_mode',
         'R_srh', 'dRsrh_dpsi', 'dRsrh_dphin', 'dRsrh_dphip',
         'R_rad', 'dRrad_dpsi', 'dRrad_dphin', 'dRrad_dphip',
-        'R_aug', 'dRrad_dpsi', 'dRaug_dphin', 'dRaug_dphip']
+        'R_aug', 'dRrad_dpsi', 'dRaug_dphin', 'dRaug_dphip',
+        'gain', 'dg_dpsi', 'dg_dphin', 'dg_dphip']
     calculated_params_boundaries = [
         'Vt',
         'jn', 'djn_dpsi1', 'djn_dpsi2', 'djn_dphin1', 'djn_dphin2',
@@ -284,6 +286,28 @@ class LaserDiodeModel1d(LaserDiode):
             n, 0, p, dp_dphip, n0, p0, self.vn['Cn'], self.vn['Cp']
         )
 
+    def _update_gain(self):
+        # calculate gain ind its derivatives w.r.t. carrier densities
+        gain, dg_dn, dg_dp = gain_2p(
+            n=self.sol['n'][self.ar_ix],
+            p=self.sol['p'][self.ar_ix],
+            g0=self.vn['g0'],
+            N_tr=self.vn['N_tr'],
+            return_derivatives=True
+        )
+        # discard negative gain (absorption)
+        mask_abs = (gain < 0)
+        gain[mask_abs] = 0.0
+        dg_dn[mask_abs] = 0.0
+        dg_dp[mask_abs] = 0.0
+
+        # calculate derivatives w.r.t. to potentials and save results
+        self.vn['gain'] = gain
+        self.vn['dg_dpsi'] = (dg_dn * self.sol['dn_dpsi'][self.ar_ix]
+                              + dg_dp * self.sol['dp_dpsi'][self.ar_ix])
+        self.vn['dg_dphin'] = dg_dn * self.sol['dn_dphin'][self.ar_ix]
+        self.vn['dg_dphip'] = dg_dp * self.sol['dp_dphip'][self.ar_ix]
+
     def _transport_system(self):
         m = len(self.xn) - 2            # number of inner nodes
         h = self.xn[1:] - self.xn[:-1]  # mesh steps
@@ -357,6 +381,14 @@ class LaserDiodeModel1d(LaserDiode):
         diags = [2*m, m, 1, 0, -1, -m+1, -m, -m-1, -2*m+1, -2*m, -2*m-1]
 
         return data, diags, residuals
+
+    def _lasing_system(self):
+        m = len(self.xn) - 2
+        # [poisson, electron current density, hole -/-,
+        #  photon density rate equation]
+        residuals = np.empty(m * 3 + 1)  # [poisson, electron current]
+        data, diags, residuals[:-1] = self._transport_system()
+        pass
 
     def _update_densities(self):
         # aliases (pointers)
