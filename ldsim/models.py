@@ -114,7 +114,7 @@ class LaserDiodeModel1d(LaserDiode):
         dn2_dphin2 = semicond.dn_dphin(psi[1:], phi_n[1:], Nc, Ec, Vt)
 
         # electron current density and its derivatives
-        jn = flux.SG_jn(n1, n2, B_plus, B_minus, h)
+        jn = flux.SG_jn(n1, n2, B_plus, B_minus, h, Vt, q, mu_n)
         djn_dpsi1 = flux.SG_djn_dpsi1(n1, n2, dn1_dpsi1, B_minus, Bdot_plus,
                                       Bdot_minus, h, Vt, q, mu_n)
         djn_dpsi2 = flux.SG_djn_dpsi2(n1, n2, dn2_dpsi2, B_plus, Bdot_plus,
@@ -422,8 +422,37 @@ class LaserDiodeModel1d(LaserDiode):
         residuals[-1] = (self.vg * net_gain * self.S
                          + self.beta_sp * R_rad_ar_int)
 
-        # TODO: construct Jacobian
-        raise NotImplementedError
+        # construct Jacobian from diagonals
+        data[6, inds] += self.q * self.vn['dRst_dpsi']        # j21
+        data[3, m+inds] += self.q * self.vn['dRst_dphin']     # j22
+        data[1, 2*m+inds] += self.q * self.vn['dRst_dphip']   # j23
+        data[9, inds] += -self.q * self.vn['dRst_dpsi']       # j31
+        data[6, m+inds] += -self.q * self.vn['dRst_dphin']     # j32
+        data[3, 2*m+inds] += -self.q * self.vn['dRst_dphip']  # j33
+        J = sparse.spdiags(data, diags, m=3*m+1, n=3*m+1, format='lil')
+
+        # fill rightmost column
+        J[m+inds, -1] = self.q * self.vn['dRst_dS']
+        J[2*m+inds, -1] = -self.q * self.vn['dRst_dS']
+
+        # fill bottom row
+        w = (self.xb[1:] - self.xb[:-1])[self.ar_ix[1:-1]]
+        T = self.vn['wg_mode'][self.ar_ix]
+        J[-1, inds] = (
+            self.vg * self.vn['dg_dpsi'] * self.S
+            + self.beta_sp * self.vn['dRrad_dpsi'][self.ar_ix]
+        ) * w * T
+        J[-1, m+inds] = (
+            self.vg * self.vn['dg_dphin'] * self.S
+            + self.beta_sp * self.vn['dRrad_dphin'][self.ar_ix]
+        ) * w * T
+        J[-1, 2*m+inds] = (
+            self.vg * self.vn['dg_dphip'] * self.S
+            + self.beta_sp * self.vn['dRrad_dphip'][self.ar_ix]
+        ) * w * T
+        J[-1, -1] = self.vg * net_gain
+
+        return J.tocsc(), residuals
 
     def _update_densities(self):
         # aliases (pointers)
@@ -720,5 +749,73 @@ class LaserDiodeModel1d(LaserDiode):
 
         return fluct
 
+    def lasing_step(self, omega=0.1, omega_S=(1.0, 0.1)):
+        """
+        Perform a single Newton step for the lasing problem -- combination
+        of the transport problem with the photon density rate equation.
+        As a result,  solution vector `x` (all potentials and photon
+        densities) is updated by `dx` with damping parameter `omega`,
+        i.e. `x += omega * dx`.
+
+        Parameters
+        ----------
+        omega : float
+            Damping parameter for potentials.
+        omega_S : (float, float)
+            Damping parameter for photon density `S`. First value is used
+            for increasing `S`, second -- for decreasing `S`.
+            Separate values are needed to prevent `S` converging to a
+            negative value near threshold.
+
+        Returns
+        -------
+        fluct : number
+            Solution fluctuation, i.e. ratio of `dx` and `x` L2 norms.
+
+        """
+        # `apply_voltage` does not calculate gain
+        if len(self.fluct) == 0:
+            self._update_gain()
+
+        # solve the system
+        J, residuals = self._lasing_system()
+        dx = sparse.linalg.spsolve(J, -residuals)
+
+        # calculate and save fluctuation
+        fluct = np.sqrt(
+            np.sum(dx**2) / (
+                np.sum(self.sol['psi'][1:-1]**2)
+                + np.sum(self.sol['phi_n'][1:-1]**2)
+                + np.sum(self.sol['phi_p'][1:-1]**2)
+                + self.S**2
+            )
+        )
+        self.fluct.append(fluct)
+
+        # update current solution
+        m = len(self.xn) - 2
+        self.sol['psi'][1:-1] += dx[:m] * omega
+        self.sol['phi_n'][1:-1] += dx[m:2*m] * omega
+        self.sol['phi_p'][1:-1] += dx[2*m:3*m] * omega
+        if dx[-1] > 0:
+            self.S += dx[-1] * omega_S[0]
+        else:
+            self.S += dx[-1] * omega_S[1]
+        self._update_densities()
+        self._update_current_densities()
+        self._update_recombination_rates()
+        self._update_gain()
+
+        return fluct
+
     def get_current_density(self):
-        return (self.vb['jn'] + self.vb['jp']).mean()
+        j = (self.vb['jn'] + self.vb['jp']).mean()
+        if self.is_dimensionless:
+            j *= units.j
+        return j
+
+    def get_output_power(self):
+        P = self.photon_energy * self.S * self.vg*self.alpha_m * self.w*self.L
+        if self.is_dimensionless:
+            P *= units.P
+        return P
