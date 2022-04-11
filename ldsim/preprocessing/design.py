@@ -292,7 +292,11 @@ class LaserDiode:
             for i, layer in enumerate(self.layers):
                 ix = (inds == i)
                 if ix.any():
-                    val[ix] = layer.calculate(param, dx[ix], z)
+                    if isinstance(z, np.ndarray):
+                        z_layer = z[ix]
+                    else:
+                        z_layer = z
+                    val[ix] = layer.calculate(param, dx[ix], z_layer)
         if self.is_dimensionless:
             val /= units.dct[param]
         return val

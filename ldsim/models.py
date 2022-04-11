@@ -11,28 +11,29 @@ from ldsim.semicond.gain import gain_2p
 from ldsim.transport import flux, vrs
 
 
-class LaserDiodeModel1d(LaserDiode):
-    input_params_nodes = [
-        'Ev', 'Ec', 'Eg', 'Nd', 'Na', 'C_dop', 'Nc', 'Nv', 'mu_n', 'mu_p',
-        'tau_n', 'tau_p', 'B', 'Cn', 'Cp', 'eps', 'n_refr', 'g0', 'N_tr',
-        'fca_e', 'fca_h', 'T']
-    input_params_boundaries = ['Ev', 'Ec', 'Nc', 'Nv', 'mu_n', 'mu_p', 'T']
-    params_active = ['g0', 'N_tr']
-    calculated_params_nodes = [
-        'Vt', 'psi_lcn', 'n0', 'p0', 'psi_bi', 'wg_mode',
-        'R_srh', 'dRsrh_dpsi', 'dRsrh_dphin', 'dRsrh_dphip',
-        'R_rad', 'dRrad_dpsi', 'dRrad_dphin', 'dRrad_dphip',
-        'R_aug', 'dRrad_dpsi', 'dRaug_dphin', 'dRaug_dphip',
-        'gain', 'dg_dpsi', 'dg_dphin', 'dg_dphip', 'fca',
-        'R_st', 'dRst_dpsi', 'dRst_dphin', 'dRst_dphip', 'dRst_dS']
-    calculated_params_boundaries = [
-        'Vt',
-        'jn', 'djn_dpsi1', 'djn_dpsi2', 'djn_dphin1', 'djn_dphin2',
-        'jp', 'djp_dpsi1', 'djp_dpsi2', 'djp_dphip1', 'djp_dphip2']
-    solution_arrays = [
-        'psi', 'phi_n', 'phi_p', 'n', 'p', 'dn_dpsi', 'dn_dphin',
-        'dp_dpsi', 'dp_dphip']
+input_params_nodes = [
+    'Ev', 'Ec', 'Eg', 'Nd', 'Na', 'C_dop', 'Nc', 'Nv', 'mu_n', 'mu_p',
+    'tau_n', 'tau_p', 'B', 'Cn', 'Cp', 'eps', 'n_refr', 'g0', 'N_tr',
+    'fca_e', 'fca_h', 'T']
+input_params_boundaries = ['Ev', 'Ec', 'Nc', 'Nv', 'mu_n', 'mu_p', 'T']
+params_active = ['g0', 'N_tr']
+calculated_params_nodes = [
+    'Vt', 'psi_lcn', 'n0', 'p0', 'psi_bi', 'wg_mode',
+    'R_srh', 'dRsrh_dpsi', 'dRsrh_dphin', 'dRsrh_dphip',
+    'R_rad', 'dRrad_dpsi', 'dRrad_dphin', 'dRrad_dphip',
+    'R_aug', 'dRrad_dpsi', 'dRaug_dphin', 'dRaug_dphip',
+    'gain', 'dg_dpsi', 'dg_dphin', 'dg_dphip', 'fca',
+    'R_st', 'dRst_dpsi', 'dRst_dphin', 'dRst_dphip', 'dRst_dS']
+calculated_params_boundaries = [
+    'Vt',
+    'jn', 'djn_dpsi1', 'djn_dpsi2', 'djn_dphin1', 'djn_dphin2',
+    'jp', 'djp_dpsi1', 'djp_dpsi2', 'djp_dphip1', 'djp_dphip2']
+solution_arrays = [
+    'psi', 'phi_n', 'phi_p', 'n', 'p', 'dn_dpsi', 'dn_dphin',
+    'dp_dpsi', 'dp_dphip']
 
+
+class LaserDiodeModel1d(LaserDiode):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -42,11 +43,12 @@ class LaserDiodeModel1d(LaserDiode):
         self.ar_ix = None  # active region mask for xn
 
         # parameters at mesh nodes and volume boundaries
-        self.vn = dict.fromkeys(self.input_params_nodes
-                                + self.calculated_params_nodes)
-        self.vb = dict.fromkeys(self.input_params_boundaries
-                                + self.calculated_params_boundaries)
-        self.sol = dict.fromkeys(self.solution_arrays)
+        self.vn = dict.fromkeys(input_params_nodes
+                                + calculated_params_nodes
+                                + params_active)
+        self.vb = dict.fromkeys(input_params_boundaries
+                                + calculated_params_boundaries)
+        self.sol = dict.fromkeys(solution_arrays)
         self.S = 1e-12
         self.alpha_fca = 0.0
         self.Gain = 0.0
@@ -91,7 +93,7 @@ class LaserDiodeModel1d(LaserDiode):
         """
         # nodes
         inds, dx = self._inds_dx(self.xn)
-        for param in self.input_params_nodes:
+        for param in input_params_nodes:
             if param in self.params_active:
                 continue
             self.vn[param] = self.calculate(
@@ -104,7 +106,7 @@ class LaserDiodeModel1d(LaserDiode):
 
         # boundaries
         inds, dx = self._inds_dx(self.xb)
-        for param in self.input_params_boundaries:
+        for param in input_params_boundaries:
             self.vb[param] = self.calculate(
                 param, self.xb, z=0, inds=inds, dx=dx)
 
@@ -825,3 +827,72 @@ class LaserDiodeModel1d(LaserDiode):
         if self.is_dimensionless:
             P *= units.P
         return P
+
+
+class LaserDiodeModel2d(LaserDiodeModel1d):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.mz = 20
+
+    def set_number_of_slices(self, m: int):
+        self.mz = m
+
+    def solve_waveguide(self, step=1e-7, n_modes=3, remove_layers=(0, 0)):
+        super().solve_waveguide(step, n_modes, remove_layers)
+        raise NotImplementedError
+
+    def generate_nonuniform_mesh(self, method='first', step_uni=5e-8,
+                                 step_min=1e-7, step_max=20e-7, sigma=100e-7,
+                                 y_ext=[None, None]):
+        """
+        Generate mesh that is nonuniform along the vertical (x) axis and
+        uniform along the longitudinal (z) axis. Uses local nonuniformity in
+        bandgap (Eg) to choose mesh spacing.
+        See `ldsim.mesh.generate_nonuniform_mesh` for detailed description.
+
+        Parameter `method` decides the way this mesh is generated.
+        * 'first' -- use the first slice along the z axis (z = 0). Default,
+        useful when bandgap does not depend on z, as this option avoids
+        repetative computations.
+        * 'mean` -- average bandgap over all slices, then generate mesh using
+        local change in this "mean" bandgap.
+        * 'finest' -- generate mesh for every slice, then use the one with the
+        most points.
+        """
+        assert not self.is_dimensionless
+        thickness = self.get_thickness()
+        num_points = int(round(thickness // step_uni))
+        x = np.linspace(0, thickness, num_points)
+        z = np.linspace(0, self.L, self.mz + 1)
+
+        if method == 'finest':
+            xn = []
+            for i in range(self.mz):
+                Eg = self.calculate('Eg', x, z[i])
+                xn_i, _ = generate_nonuniform_mesh(
+                    x, Eg, step_min=step_min, step_max=step_max,
+                    sigma=sigma, y_ext=y_ext
+                )
+                if len(xn_i) > len(xn):
+                    xn = xn_i
+        else:
+            if method == 'first':
+                Eg = self.calculate('Eg', x,  0)
+            else:
+                assert method == 'mean'
+                Eg = np.zeros((self.mz, num_points))
+                for i in range(self.mz):
+                    Eg[i] = self.calculate('Eg', x, z[i])
+                Eg = np.mean(Eg, axis=0)
+
+            xn, _ = generate_nonuniform_mesh(
+                x, Eg, step_min=step_min, step_max=step_max,
+                sigma=sigma, y_ext=y_ext
+            )
+
+        xb = (xn[1:] + xn[:-1]) / 2
+        self.xn = np.tile(xn, (self.mz, 1))
+        self.xb = np.tile(xb, (self.mz, 1))
+        zn = (z[1:] + z[:-1]) / 2
+        self.zn = np.tile(zn[:, np.newaxis], (1, len(xn)))
+        self.zb = np.tile(z[:, np.newaxis], (1, len(xn)))
