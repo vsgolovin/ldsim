@@ -94,13 +94,13 @@ class LaserDiodeModel1d(LaserDiode):
         # nodes
         inds, dx = self._inds_dx(self.xn)
         for param in input_params_nodes:
-            if param in self.params_active:
+            if param in params_active:
                 continue
             self.vn[param] = self.calculate(
                 param, self.xn, z=0, inds=inds, dx=dx)
         # active region
         inds, dx = inds[self.ar_ix], dx[self.ar_ix]
-        for param in self.params_active:
+        for param in params_active:
             self.vn[param] = self.calculate(
                 param, self.xn[self.ar_ix], z=0, inds=inds, dx=dx)
 
@@ -865,6 +865,7 @@ class LaserDiodeModel2d(LaserDiodeModel1d):
         x = np.linspace(0, thickness, num_points)
         z = np.linspace(0, self.L, self.mz + 1)
 
+        # generate 1D array of mesh nodes along x (`xn`)
         if method == 'finest':
             xn = []
             for i in range(self.mz):
@@ -890,9 +891,12 @@ class LaserDiodeModel2d(LaserDiodeModel1d):
                 sigma=sigma, y_ext=y_ext
             )
 
+        # save 2D arrays as mesh
         xb = (xn[1:] + xn[:-1]) / 2
         self.xn = np.tile(xn, (self.mz, 1))
         self.xb = np.tile(xb, (self.mz, 1))
         zn = (z[1:] + z[:-1]) / 2
         self.zn = np.tile(zn[:, np.newaxis], (1, len(xn)))
         self.zb = np.tile(z[:, np.newaxis], (1, len(xn)))
+        self.ar_ix = self._get_ar_mask(self.xn)
+        self._calculate_all_params()
