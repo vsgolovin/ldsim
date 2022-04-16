@@ -219,6 +219,21 @@ class LaserDiodeModel1d(LaserDiode):
         self.vn['Vt'] = self.vn['T'] * self.kb
         self.vb['Vt'] = self.vb['T'] * self.kb
 
+    def _update_densities(self):
+        # function arguments
+        kwargs_n = dict(psi=self.sol['psi'], phi_n=self.sol['phi_n'],
+                        Nc=self.vn['Nc'], Ec=self.vn['Ec'], Vt=self.vn['Vt'])
+        kwargs_p = dict(psi=self.sol['psi'], phi_p=self.sol['phi_p'],
+                        Nv=self.vn['Nv'], Ev=self.vn['Ev'], Vt=self.vn['Vt'])
+        # densities
+        self.sol['n'] = semicond.n(**kwargs_n)
+        self.sol['p'] = semicond.p(**kwargs_p)
+        # derivatives
+        self.sol['dn_dpsi'] = semicond.dn_dpsi(**kwargs_n)
+        self.sol['dn_dphin'] = semicond.dn_dphin(**kwargs_n)
+        self.sol['dp_dpsi'] = semicond.dp_dpsi(**kwargs_p)
+        self.sol['dp_dphip'] = semicond.dp_dphip(**kwargs_p)
+
     def _update_current_densities(self):
         psi = self.sol['psi']
         B_plus = flux.bernoulli((psi[1:] - psi[:-1]) / self.vb['Vt'])
@@ -485,25 +500,6 @@ class LaserDiodeModel1d(LaserDiode):
         self.alpha_fca = np.sum(self.vn['fca'][1:-1] * dx)
         self.Gain = np.sum(self.vn['gain'] * T[self.ar_ix]
                            * dx[self.ar_ix[1:-1]])
-
-    def _update_densities(self):
-        # aliases (pointers)
-        psi = self.sol['psi']
-        phi_n = self.sol['phi_n']
-        phi_p = self.sol['phi_p']
-        Nc = self.vn['Nc']
-        Nv = self.vn['Nv']
-        Ec = self.vn['Ec']
-        Ev = self.vn['Ev']
-        Vt = self.vn['Vt']
-        # densities
-        self.sol['n'] = semicond.n(psi, phi_n, Nc, Ec, Vt)
-        self.sol['p'] = semicond.p(psi, phi_p, Nv, Ev, Vt)
-        # derivatives
-        self.sol['dn_dpsi'] = semicond.dn_dpsi(psi, phi_n, Nc, Ec, Vt)
-        self.sol['dn_dphin'] = semicond.dn_dphin(psi, phi_n, Nc, Ec, Vt)
-        self.sol['dp_dpsi'] = semicond.dp_dpsi(psi, phi_p, Nv, Ev, Vt)
-        self.sol['dp_dphip'] = semicond.dp_dphip(psi, phi_p, Nv, Ev, Vt)
 
     # methods for solving the drift-diffusion system
     def _transport_system(self):
