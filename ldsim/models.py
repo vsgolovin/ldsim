@@ -1,11 +1,9 @@
 import warnings
 import numpy as np
-from scipy.linalg import solve_banded
 from scipy import sparse
 from ldsim.preprocessing.design import LaserDiode
 from ldsim.mesh import generate_nonuniform_mesh
 from ldsim import units, newton, semicond
-import ldsim.semicond.equilibrium as eq
 import ldsim.semicond.recombination as rec
 from ldsim.semicond.gain import gain_2p
 from ldsim.transport import flux, vrs
@@ -152,41 +150,6 @@ class LaserDiodeModel1d(LaserDiode):
                                    Nv=self.vn['Nv'], Ev=self.vn['Ev'],
                                    Vt=self.vn['Vt'])
 
-    def make_equilibrium_solver(self):
-        """
-        Generate solver for electrostatic potential distribution along
-        vertical axis at equilibrium.
-        """
-        if self.vn['psi_lcn'] is None:
-            self.solve_lcn()
-
-        h = self.xn[1:] - self.xn[:-1]
-        w = self.xb[1:] - self.xb[:-1]
-        v = self.vn
-
-        def res(psi):
-            n = semicond.n(psi, 0, v['Nc'], v['Ec'], v['Vt'])
-            p = semicond.p(psi, 0, v['Nv'], v['Ev'], v['Vt'])
-            r = eq.poisson_res(psi, n, p, h, w, v['eps'], self.eps_0, self.q,
-                               v['C_dop'])
-            return r
-
-        def jac(psi):
-            n = semicond.n(psi, 0, v['Nc'], v['Ec'], v['Vt'])
-            ndot = semicond.dn_dpsi(psi, 0, v['Nc'], v['Ec'], v['Vt'])
-            p = semicond.p(psi, 0, v['Nv'], v['Ev'], v['Vt'])
-            pdot = semicond.dp_dpsi(psi, 0, v['Nv'], v['Ev'], v['Vt'])
-            j = eq.poisson_jac(psi, n, ndot, p, pdot, h, w, v['eps'],
-                               self.eps_0, self.q, v['C_dop'])
-            return j
-
-        psi_init = v['psi_lcn'].copy()
-        sol = newton.NewtonSolver(
-            res=res, jac=jac, x0=psi_init,
-            linalg_solver=lambda A, b: solve_banded((1, 1), A, b),
-            inds=np.arange(1, len(psi_init) - 1))
-        return sol
-
     def solve_equilibrium(self, maxiter=100, fluct=1e-8, omega=1.0):
         """
         Calculate electrostatic potential distribution at equilibrium (zero
@@ -203,7 +166,10 @@ class LaserDiodeModel1d(LaserDiode):
             Damping parameter.
 
         """
-        sol = self.make_equilibrium_solver()
+        if self.vn['psi_lcn'] is None:
+            self.solve_lcn()
+        sol = newton.EquilibriumSolver1d(self.vn, self.xn, self.xb, self.q,
+                                         self.eps_0)
         sol.solve(maxiter, fluct, omega)
         if sol.fluct[-1] > fluct:
             warnings.warn('LaserDiode1D.solve_equilibrium(): fluctuation '
@@ -941,6 +907,43 @@ class LaserDiodeModel2d(LaserDiodeModel1d):
                                    Ec=self.vn['Ec'], Vt=self.vn['Vt'])
         self.vn['p0'] = semicond.p(psi=psi_lcn, phi_p=0, Nv=self.vn['Nv'],
                                    Ev=self.vn['Ev'], Vt=self.vn['Vt'])
+
+    def solve_equilibrium(self, maxiter=100, fluct=1e-8, omega=1.0):
+        """
+        Calculate electrostatic potential distribution at equilibrium (zero
+        external bias). Uses Newton's method implemented in `NewtonSolver`.
+
+        Parameters
+        ----------
+        maxiter : int, optional
+            Maximum number of Newton's method iterations.
+        fluct : float, optional
+            Fluctuation of solution that is needed to stop iterating before
+            reacing `maxiter` steps.
+        omega : float, optional
+            Damping parameter.
+
+        """
+        if self.vn['psi_lcn'] is None:
+            self.solve_lcn()
+
+        # calculate built-in potential for every slice
+        psi_bi = np.zeros_like(self.xn)
+        for i in range(self.mz):
+            solver = newton.EquilibriumSolver1d(self.vn, self.xn, self.xb,
+                                                self.q, self.eps_0, i)
+            solver.solve(maxiter, fluct, omega)
+            if solver.fluct[-1] > fluct:
+                warnings.warn('Equilibrium solver: fluctuation'
+                              + f'{solver.fluct[-1]:.3e} exceeds {fluct:.3e}.')
+            psi_bi[i] = solver.x
+
+        # save results
+        self.vn['psi_bi'] = psi_bi
+        self.sol['psi'] = psi_bi.copy()
+        self.sol['phi_n'] = np.zeros_like(psi_bi)
+        self.sol['phi_p'] = np.zeros_like(psi_bi)
+        self._update_densities()
 
     def _update_waveguide_mode(self):
         assert self.waveguide_function

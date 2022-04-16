@@ -3,6 +3,7 @@ Defines a class for solving systems of equations using Newton's method.
 """
 
 import numpy as np
+from scipy.linalg import solve_banded
 from ldsim import semicond
 from ldsim.semicond import equilibrium as eq
 
@@ -130,3 +131,52 @@ class LCNSolver1d(NewtonSolver):
         ndot = semicond.dn_dpsi(psi, 0, self.Nc, self.Ec, self.Vt)
         pdot = semicond.dp_dpsi(psi, 0, self.Nv, self.Ev, self.Vt)
         return pdot - ndot
+
+
+class EquilibriumSolver1d(NewtonSolver):
+    def __init__(self, params: dict, xn: np.ndarray, xb: np.ndarray,
+                 q: float, eps_0: float, i: int = 0):
+        # select slice (2D model) or whole arrays (1D)
+        if xn.ndim == 1:
+            inds = np.arange(len(xn))
+        else:
+            inds = (i, np.arange(xn.shape[1]))
+        xn = xn[inds]
+        self.h = xn[1:] - xn[:-1]
+        if isinstance(inds, tuple):
+            xb = xb[i]
+        self.w = xb[1:] - xb[:-1]
+        self.Nc = params['Nc'][inds]
+        self.Nv = params['Nv'][inds]
+        self.Ec = params['Ec'][inds]
+        self.Ev = params['Ev'][inds]
+        self.Vt = params['Vt'][inds]
+        self.C_dop = params['C_dop'][inds]
+        self.eps = params['eps'][inds]
+        self.q = q
+        self.eps_0 = eps_0
+
+        # save n and p as they are needed for both residual and Jacobian
+        self.n = None
+        self.p = None
+
+        # initialize solver
+        super().__init__(
+            res=self._residual,
+            jac=self._jacobian,
+            x0=params['psi_lcn'][inds],
+            linalg_solver=lambda A, b: solve_banded((1, 1), A, b),
+            inds=np.arange(1, len(xn) - 1)
+        )
+
+    def _residual(self, psi: np.ndarray):
+        self.n = semicond.n(psi, 0, self.Nc, self.Ec, self.Vt)
+        self.p = semicond.p(psi, 0, self.Nv, self.Ev, self.Vt)
+        return eq.poisson_res(psi, self.n, self.p, self.h, self.w,
+                              self.eps, self.eps_0, self.q, self.C_dop)
+
+    def _jacobian(self, psi: np.ndarray):
+        ndot = semicond.dn_dpsi(psi, 0, self.Nc, self.Ec, self.Vt)
+        pdot = semicond.dp_dpsi(psi, 0, self.Nv, self.Ev, self.Vt)
+        return eq.poisson_jac(psi, self.n, ndot, self.p, pdot, self.h, self.w,
+                              self.eps, self.eps_0, self.q, self.C_dop)
