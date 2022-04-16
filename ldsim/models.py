@@ -49,6 +49,9 @@ class LaserDiodeModel1d(LaserDiode):
         self.vb = dict.fromkeys(input_params_boundaries
                                 + calculated_params_boundaries)
         self.sol = dict.fromkeys(solution_arrays)
+        self.gamma = None
+        self.n_eff = None
+        self.waveguide_function = None
         self.S = 1e-12
         self.alpha_fca = 0.0
         self.Gain = 0.0
@@ -61,10 +64,14 @@ class LaserDiodeModel1d(LaserDiode):
 
     # preprocessing methods
     def solve_waveguide(self, step=1e-7, n_modes=3, remove_layers=(0, 0)):
-        rv = super().solve_waveguide(step, n_modes, remove_layers)
+        rv = super().solve_waveguide(step=step, n_modes=n_modes,
+                                     remove_layers=remove_layers)
+        i = np.argmax(rv['gammas'])
+        self.gamma = rv['gammas'][i]
+        self.n_eff = rv['n_eff'][i]
+        self.waveguide_function = rv['waveguide_function']
         if self.xn is not None:
-            self.vn['wg_mode'] = self.get_waveguide_mode(self.xn,
-                                                         self.is_dimensionless)
+            self._update_waveguide_mode()
         return rv
 
     def generate_nonuniform_mesh(self, step_uni=5e-8, step_min=1e-7,
@@ -111,9 +118,8 @@ class LaserDiodeModel1d(LaserDiode):
                 param, self.xb, z=0, inds=inds, dx=dx)
 
         # waveguide mode
-        if self.gamma:  # not None -> calculated waveguide mode profile
-            self.vn['wg_mode'] = self.get_waveguide_mode(self.xn,
-                                                         self.is_dimensionless)
+        if self.gamma is not None:  # calculated waveguide mode profile
+            self._update_waveguide_mode()
         self._update_Vt()
 
     def make_lcn_solver(self):
@@ -267,6 +273,13 @@ class LaserDiodeModel1d(LaserDiode):
         return super().original_units()
 
     # methods for updating arrays usign currently defined potentials
+    def _update_waveguide_mode(self):
+        if self.is_dimensionless:
+            self.vn['wg_mode'] = self.waveguide_function(
+                self.xn * units.x) * units.x
+        else:
+            self.vn['wg_mode'] = self.waveguide_function(self.xn)
+
     def _update_Vt(self):
         self.vn['Vt'] = self.vn['T'] * self.kb
         self.vb['Vt'] = self.vb['T'] * self.kb
@@ -830,16 +843,19 @@ class LaserDiodeModel1d(LaserDiode):
 
 
 class LaserDiodeModel2d(LaserDiodeModel1d):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args,  num_slices=10, **kwargs):
         super().__init__(*args, **kwargs)
-        self.mz = 20
+        self.zn = None
+        self.zb = None
+        self.set_number_of_slices(num_slices)
 
     def set_number_of_slices(self, m: int):
+        """
+        Set number of cross-sections (along x, perpendicular to z).
+        """
         self.mz = m
-
-    def solve_waveguide(self, step=1e-7, n_modes=3, remove_layers=(0, 0)):
-        super().solve_waveguide(step, n_modes, remove_layers)
-        raise NotImplementedError
+        self.alpha_fca = np.zeros(m)
+        self.Gain = np.zeros(m)
 
     def generate_nonuniform_mesh(self, method='first', step_uni=5e-8,
                                  step_min=1e-7, step_max=20e-7, sigma=100e-7,
@@ -900,3 +916,37 @@ class LaserDiodeModel2d(LaserDiodeModel1d):
         self.zb = np.tile(z[:, np.newaxis], (1, len(xn)))
         self.ar_ix = self._get_ar_mask(self.xn)
         self._calculate_all_params()
+
+    def solve_waveguide(self, step=1e-7, n_modes=3, remove_layers=(0, 0)):
+        self.gamma = np.zeros(self.mz)
+        self.n_eff = np.zeros_like(self.gamma)
+        self.waveguide_function = []
+        if self.zn is None:
+            zn = np.linspace(0, self.L, self.mz + 1)
+            zn = (zn[1:] + zn[:-1]) / 2
+        else:
+            zn = self.zn[:, 0]
+
+        for i in range(self.mz):
+            rv = LaserDiode.solve_waveguide(
+                self, z=zn[i], step=step, n_modes=n_modes,
+                remove_layers=remove_layers
+            )
+            j = np.argmax(rv['gammas'])
+            self.gamma[i] = rv['gammas'][j]
+            self.n_eff[i] = rv['n_eff'][j]
+            self.waveguide_function.append(rv['waveguide_function'])
+
+        if self.xn:
+            self._update_waveguide_mode()
+
+    def _update_waveguide_mode(self):
+        assert self.waveguide_function
+        wg_mode = np.zeros((self.mz, self.xn.shape[1]))
+        for i in range(self.mz):
+            f = self.waveguide_function[i]
+            if self.is_dimensionless:
+                wg_mode[i] = f(self.xn[i] * units.x) * units.x
+            else:
+                wg_mode[i] = f(self.xn[i])
+        self.vn['wg_mode'] = wg_mode

@@ -195,11 +195,6 @@ class LaserDiode:
         self.q = const.q
         self.eps_0 = const.eps_0
 
-        # waveguide properties
-        self.gamma = None
-        self.n_eff = None
-        self.waveguide_function = None
-
     def make_dimensionless(self):
         "Make every parameter dimensionless."
         if self.is_dimensionless:
@@ -319,7 +314,7 @@ class LaserDiode:
             ar_ix |= (inds == ind)
         return ar_ix
 
-    def solve_waveguide(self, step=1e-7, n_modes=3, remove_layers=(0, 0)):
+    def solve_waveguide(self, z=0, step=1e-7, n_modes=3, remove_layers=(0, 0)):
         """
         Calculate vertical mode profile. Finds `n_modes` solutions of the
         eigenvalue problem with the highest eigenvalues (effective
@@ -344,7 +339,7 @@ class LaserDiode:
         x_start = boundaries[i1]
         x_end = boundaries[len(boundaries) - 1 - i2]
         x = np.arange(x_start, x_end, step)
-        n = self.calculate('n_refr', x)
+        n = self.calculate('n_refr', x, z)
         ar_ix = self._get_ar_mask(x)
 
         # solve the eigenvalue problem
@@ -360,19 +355,8 @@ class LaserDiode:
             gammas[i] = (mode * step)[ar_ix].sum()  # modes are normalized
         i = np.argmax(gammas)
         mode = modes[:, i]
-
-        # storing results
-        self.gamma = gammas[i]
-        self.n_eff = n_eff_values[i]
-        self.wgm_fun = interp1d(x, mode, bounds_error=False, fill_value=0)
+        wgm_fun = interp1d(x, mode, bounds_error=False, fill_value=0)
 
         # return calculation results in a dictionary
-        return dict(x=x, n=n, modes=modes, n_eff=n_eff_values, gammas=gammas)
-
-    def get_waveguide_mode(self, x, dimensionless):
-        """
-        Return waveguide mode intensity at points `x`.
-        """
-        if dimensionless:
-            return self.wgm_fun(x * units.x) * units.x
-        return self.wgm_fun(x)
+        return dict(x=x, n=n, modes=modes, n_eff=n_eff_values, gammas=gammas,
+                    waveguide_function=wgm_fun)
