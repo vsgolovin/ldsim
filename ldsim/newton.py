@@ -3,6 +3,8 @@ Defines a class for solving systems of equations using Newton's method.
 """
 
 import numpy as np
+from ldsim import semicond
+from ldsim.semicond import equilibrium as eq
 
 
 def l2_norm(x):
@@ -27,7 +29,7 @@ class NewtonSolver(object):
         linalg_solver : callable
             Method for solving the 'A*x = b` system.
         inds : iterable or NoneType
-            At which indices of solution need to be updated at every
+            At which indices the solution needs to be updated at every
             iteration. `None` is equivalent to `np.arange(len(x0))`,
             i.e., the whole solution will be updated.
 
@@ -87,3 +89,44 @@ class NewtonSolver(object):
             self.step(omega)
             if self.fluct[-1] < fluct:
                 break
+
+
+class LCNSolver1d(NewtonSolver):
+    def __init__(self, params: dict, i: int = 0):
+        """
+        Newton solver for 1D electrostatic potential distribution along the
+        vertical axis (x) at equilibrium assuming local charge neutrality.
+        If using 2D model, specify the vertical slice index `i`.
+        """
+        Ec = params['Ec']
+        if Ec.ndim == 1:
+            inds = np.arange(len(Ec))
+        else:
+            inds = (i, np.arange(Ec.shape[1]))
+        self.Ec = params['Ec'][inds]
+        self.Ev = params['Ev'][inds]
+        self.Nc = params['Nc'][inds]
+        self.Nv = params['Nv'][inds]
+        self.Vt = params['Vt'][inds]
+        self.C_dop = params['C_dop'][inds]
+
+        # initial guess with Boltzmann statistics
+        ni = eq.intrinsic_concentration(self.Nc, self.Nv, self.Ec, self.Ev,
+                                        self.Vt)
+        Ei = eq.intrinsic_level(self.Nc, self.Nv, self.Ec, self.Ev,
+                                self.Vt)
+        Ef_i = eq.Ef_lcn_boltzmann(self.C_dop, ni, Ei, self.Vt)
+
+        # Jacobian is a vector -> element-wise division
+        super().__init__(res=self._residual, jac=self._jacobian, x0=Ef_i,
+                         linalg_solver=lambda A, b: b / A)
+
+    def _residual(self, psi: np.ndarray):
+        n = semicond.n(psi, 0, self.Nc, self.Ec, self.Vt)
+        p = semicond.p(psi, 0, self.Nv, self.Ev, self.Vt)
+        return self.C_dop - n + p
+
+    def _jacobian(self, psi: np.ndarray):
+        ndot = semicond.dn_dpsi(psi, 0, self.Nc, self.Ec, self.Vt)
+        pdot = semicond.dp_dpsi(psi, 0, self.Nv, self.Ev, self.Vt)
+        return pdot - ndot

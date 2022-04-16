@@ -122,41 +122,10 @@ class LaserDiodeModel1d(LaserDiode):
             self._update_waveguide_mode()
         self._update_Vt()
 
-    def make_lcn_solver(self):
-        """
-        Make solver for electrostatic potential distribution along the
-        vertical axis at equilibrium assuming local charge neutrality.
-        """
-        Nc = self.vn['Nc']
-        Nv = self.vn['Nv']
-        Ec = self.vn['Ec']
-        Ev = self.vn['Ev']
-        Vt = self.vn['Vt']
-
-        def f(psi):
-            n = semicond.n(psi, 0, Nc, Ec, Vt)
-            p = semicond.p(psi, 0, Nv, Ev, Vt)
-            return self.vn['C_dop'] - n + p
-
-        def fdot(psi):
-            ndot = semicond.dn_dpsi(psi, 0, Nc, Ec, Vt)
-            pdot = semicond.dp_dpsi(psi, 0, Nv, Ev, Vt)
-            return pdot - ndot
-
-        # initial guess with Boltzmann statistics
-        ni = eq.intrinsic_concentration(Nc, Nv, Ec, Ev, Vt)
-        Ei = eq.intrinsic_level(Nc, Nv, Ec, Ev, Vt)
-        Ef_i = eq.Ef_lcn_boltzmann(self.vn['C_dop'], ni, Ei, Vt)
-
-        # Jacobian is a vector -> element-wise division
-        sol = newton.NewtonSolver(res=f, jac=fdot, x0=Ef_i,
-                                  linalg_solver=lambda A, b: b / A)
-        return sol
-
     def solve_lcn(self, maxiter=100, fluct=1e-8, omega=1.0):
         """
         Find potential distribution at zero external bias assuming local
-        charge neutrality. Uses Newton's method implemented in `NewtonSolver`.
+        charge neutrality via Newton's method.
 
         Parameters
         ----------
@@ -169,7 +138,7 @@ class LaserDiodeModel1d(LaserDiode):
             Damping parameter.
 
         """
-        solver = self.make_lcn_solver()
+        solver = newton.LCNSolver1d(self.vn)
         solver.solve(maxiter, fluct, omega)
         if solver.fluct[-1] > fluct:
             warnings.warn('LaserDiode1D.solve_lcn(): fluctuation '
@@ -939,6 +908,39 @@ class LaserDiodeModel2d(LaserDiodeModel1d):
 
         if self.xn:
             self._update_waveguide_mode()
+
+    def solve_lcn(self, maxiter=100, fluct=1e-8, omega=1.0):
+        """
+        Find potential distribution at zero external bial assuming local charge
+        neutrality via Newtons's method.
+
+        Parameters
+        ----------
+        maxiter : int, optional
+            Maximum number of Newton's method iterations.
+        fluct : float, optional
+            Fluctuation of solution that is needed to stop iterating before
+            reaching `maxiter` steps.
+        omega : float, optional
+            Damping parameter.
+
+        """
+        # calculate LCN potential for every slice
+        psi_lcn = np.zeros_like(self.xn)
+        for i in range(self.mz):
+            solver = newton.LCNSolver1d(self.vn, i)
+            solver.solve(maxiter, fluct, omega)
+            if solver.fluct[-1] > fluct:
+                warnings.warn('LCN solver: fluctuation'
+                              + f'{solver.fluct[-1]:.3e} exceeds {fluct:.3e}.')
+            psi_lcn[i] = solver.x
+
+        # store results
+        self.vn['psi_lcn'] = psi_lcn
+        self.vn['n0'] = semicond.n(psi=psi_lcn, phi_n=0, Nc=self.vn['Nc'],
+                                   Ec=self.vn['Ec'], Vt=self.vn['Vt'])
+        self.vn['p0'] = semicond.p(psi=psi_lcn, phi_p=0, Nv=self.vn['Nv'],
+                                   Ev=self.vn['Ev'], Vt=self.vn['Vt'])
 
     def _update_waveguide_mode(self):
         assert self.waveguide_function
