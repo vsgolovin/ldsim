@@ -53,48 +53,5 @@ layers_list = AlGaAs.setup_layers(layers, d, x, Nd, Na)
 epi = EpiDesign(layers_list)
 
 
-#%% Create Layer objects
-ncont = Layer(name='n-contact', dx=d[0])
-ncont.update(AlGaAs.set_initial_params(x=x[0]))
-ncont.update({'Nd': Nd[0], 'Na': Na[0]})
-
-ncl = Layer(name='n-cladding', dx=d[2])
-ncl.update(AlGaAs.set_initial_params(x=x[2]))
-ncl.update({'Nd': Nd[2], 'Na': Na[2]})
-
-ngrad2 = ncont.make_gradient_layer(ncl, 'gradient', d[1])
-
-nwg = Layer(name='n-waveguide', dx=d[4])
-nwg.update(AlGaAs.set_initial_params(x=x[4]))
-nwg.update({'Nd': Nd[4], 'Na': Na[4]})
-
-ngrad = ncl.make_gradient_layer(nwg, 'gradient', d[3])
-
-act = Layer(name='active', dx=d[5], active=True)
-act.update(AlGaAs.set_initial_params(x=x[5]))
-act.update({'Nd': Nd[5], 'Na': Na[5]})
-act.update(ar_params)
-
-pwg = Layer(name='p-waveguide', dx=d[6])
-pwg.update(AlGaAs.set_initial_params(x=x[6]))
-pwg.update({'Nd': Nd[6], 'Na': Na[6]})
-
-pcl = Layer(name='p-cladding', dx=d[8])
-pcl.update(AlGaAs.set_initial_params(x=x[8]))
-pcl.update({'Nd': Nd[8], 'Na': Na[8]})
-
-pgrad = pwg.make_gradient_layer(pcl, 'gradient', d[7])
-
-pcont = Layer(name='p-contact', dx=d[10])
-pcont.update(AlGaAs.set_initial_params(x=x[10]))
-pcont.update({'Nd': Nd[10], 'Na': Na[10]})
-
-pgrad2 = pcl.make_gradient_layer(pcont, 'gradient', d[9])
-
-# create design as a list of layers
-epi1 = EpiDesign([ncont, ngrad2, ncl, ngrad, nwg, act, pwg, pgrad, pcl,
-                 pgrad2, pcont])
-
-
 
 

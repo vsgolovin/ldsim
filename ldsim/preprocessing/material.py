@@ -87,34 +87,32 @@ class material_AlGaAs:
             Nd - doping profile for donors
             Na - doping profile for acceptors
         """
-        self.structure = dict()
-        
-        for i, l in enumerate(layers):
-            n_grad_layers = 0
-            if l == 'grad':  # skip gardient layers
-                n_grad_layers += 1
-                layer_name = 'grad' + str(n_grad_layers)
-                self.structure[layer_name] = None
-                continue
-            
-            if l == 'active':
-                self.structure[l] = Layer(name=l, dx=d[i], active=True)
-                self.structure[l].update(self.ar_params)
-            else:
-                self.structure[l] = Layer(name=l, dx=d[i], active=False)
-            self.structure[l].update(self.set_initial_params(x=x[i]))
-            self.structure[l].update({'Nd': Nd[i], 'Na': Na[i]})
+        self.struct = dict()
         
         n_grad_layers = 0
         for i, l in enumerate(layers):
-            if l == 'grad':  # add gradient layers
+            # for correct defining gradient layers different names used
+            if l == 'grad':  # skip gardient layers
                 n_grad_layers += 1
                 layer_name = 'grad' + str(n_grad_layers)
-                self.structure[layer_name] = self.structure[layers[i-1]].\
-                make_gradient_layer(self.structure[layers[i+1]], 'gradient', d[i])
+                self.struct[layer_name] = None
                 layers[i] = layer_name
+                continue
+            
+            if l == 'active':
+                self.struct[l] = Layer(name=l, dx=d[i], active=True)
+                self.struct[l].update(self.ar_params)
+            else:
+                self.struct[l] = Layer(name=l, dx=d[i], active=False)
+            self.struct[l].update(self.set_initial_params(x=x[i]))
+            self.struct[l].update({'Nd': Nd[i], 'Na': Na[i]})
+        
+        for i, l in enumerate(layers):
+            if self.struct[l] is None:  # add gradient layers
+                self.struct[l] = self.struct[layers[i-1]]. \
+                make_gradient_layer(self.struct[layers[i+1]], 'gradient', d[i])
                 
-        self.layers_list = [self.structure[l] for l in layers]
+        self.layers_list = [self.struct[l] for l in layers]
         return self.layers_list
 	
             
