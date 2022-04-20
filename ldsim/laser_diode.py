@@ -8,13 +8,12 @@ identical vertical slices are connected via stimulated emission.
 import warnings
 import os
 import numpy as np
-from copy import deepcopy
 from scipy.interpolate import interp1d
 from scipy.interpolate import InterpolatedUnivariateSpline
 from scipy.linalg import solve_banded
 from scipy import sparse
 from ldsim.preprocessing import design, waveguide
-from ldsim.preprocessing.temperature import temperature_dependensies
+from ldsim.preprocessing.material import material_AlGaAs
 from ldsim import constants as const
 from ldsim import newton, units
 import ldsim.semicond as sc
@@ -29,7 +28,7 @@ ybn_params = ['Ev', 'Ec', 'Nc', 'Nv', 'mu_n', 'mu_p']
 
 class LaserDiode(object):
 
-    def __init__(self, epi, dT, L, w, R1, R2, lam, ng, alpha_i, beta_sp,
+    def __init__(self, epi, material, L, w, R1, R2, lam, ng, alpha_i, beta_sp,
                  T_dependent):
         """
         Class for storing all the model parameters of a 1D/2D laser diode.
@@ -40,8 +39,8 @@ class LaserDiode(object):
         ----------
         epi : design.EpiDesign
             Epitaxial design.
-        dT : dict
-            Dictionary of temperature model parameters
+        material : dict
+            Material class with all parameters and temperature dependencies
         L : number
             Resonator length (cm).
         w : number
@@ -74,7 +73,7 @@ class LaserDiode(object):
                 self.ar_inds.append(i)
         assert has_active_region
         self.epi = epi
-        self.dT = dT
+        self.material = material
 
         # constants
         self.q = const.q
@@ -225,8 +224,6 @@ class LaserDiode(object):
             self._calculate_param(p, 'b', inds, dx)
         if self.n_eff is not None:  # waveguide problem has been solved
             self._calc_wg_mode()
-        yin0 = deepcopy(self.yin)
-        self.dT = temperature_dependensies(300, yin0, self.dT)
 
     def _calculate_param(self, p, nodes='internal', inds=None, dx=None):
         """
@@ -564,7 +561,7 @@ class LaserDiode(object):
         Calculate temperature distribution in active region using simple 
         uniform disribution.
         """
-        P = self.get_P()[0]
+        P = self.get_P().sum()
         I = -self.get_I().mean()
         V = self.get_V()
         
@@ -617,19 +614,19 @@ class LaserDiode(object):
         self.Vt = self.Vt0 * sol['T'] / self.T_hs
             
         # update parameters
-        self.yin['Nc'] = self.dT.Nc(sol['T'])
-        self.yin['Nv'] = self.dT.Nv(sol['T'])
-        self.yin['B'] = self.dT.B(sol['T'])
-        self.yin['Cn'] = self.dT.Cn(sol['T'], self.Vt)
-        self.yin['Cp'] = self.dT.Cp(sol['T'], self.Vt)
-        self.yin['g0'] = self.dT.g0(sol['T'])
-        self.yin['N_tr'] = self.dT.Ntr(sol['T'])
-        self.yin['fca_e'] = self.dT.fca_e(sol['T'])
-        self.yin['fca_h'] = self.dT.fca_h(sol['T'])
-        self.yin['mu_n'] = self.dT.mu_n(sol['T'])
-        self.yin['mu_p'] = self.dT.mu_p(sol['T'])
+        self.yin['Nc'] = self.material.Nc(sol['T'])
+        self.yin['Nv'] = self.material.Nv(sol['T'])
+        self.yin['B'] = self.material.B(sol['T'])
+        self.yin['Cn'] = self.material.Cn(sol['T'], self.Vt)
+        self.yin['Cp'] = self.material.Cp(sol['T'], self.Vt)
+        self.yin['g0'] = self.material.g0(sol['T'])
+        self.yin['N_tr'] = self.material.Ntr(sol['T'])
+        self.yin['fca_e'] = self.material.fca_e(sol['T'])
+        self.yin['fca_h'] = self.material.fca_h(sol['T'])
+        self.yin['mu_n'] = self.material.mu_n(sol['T'])
+        self.yin['mu_p'] = self.material.mu_p(sol['T'])
         self.yin['Eg'], self.yin['Ec'], self.yin['Ev'] = \
-            self.dT.Eg_AlGaAs(sol['T'])
+            self.material.Eg_AlGaAs(sol['T'])
             
         # equilibrium carrier concentrations
         if self.iterations % 10 == 0:

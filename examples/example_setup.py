@@ -4,7 +4,7 @@ of a laser diode with design described in `sample_design.py`.
 """
 
 import matplotlib.pyplot as plt
-from sample_design import epi
+from sample_design import epi, material_AlGaAs
 from ldsim import LaserDiode
 
 # change default Matplotlib settings
@@ -14,8 +14,9 @@ plt.rc('figure.subplot', left=0.15, right=0.85)
 # create an instance of `LaserDiode` class
 # all parameters except for `ar_inds` (active region layer indices)
 # are actually irrelevant in this case
-ld = LaserDiode(epi=epi, L=3000e-4, w=100e-4, R1=0.95, R2=0.05,
-                lam=0.87e-4, ng=3.9, alpha_i=0.5, beta_sp=1e-4)
+ld = LaserDiode(epi=epi, material=material_AlGaAs, L=3000e-4, w=100e-4, 
+                R1=0.95, R2=0.05, lam=0.87e-4, ng=3.9, alpha_i=0.5, 
+                beta_sp=1e-4, T_dependent=True)
 
 # generate nonuniform mesh
 # see method docstring for detailed description
