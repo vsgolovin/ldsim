@@ -151,6 +151,8 @@ class LaserDiode:
         ----------
         layers : list
             Layers that compose the diode (`Layer` objects).
+        material : material.materialAlGaAs
+            Material class with all parameters and temperature dependencies
         L : number
             Resonator length (cm).
         w : number
