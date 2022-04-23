@@ -6,7 +6,7 @@ from ldsim.mesh import generate_nonuniform_mesh
 from ldsim import units, newton, semicond
 import ldsim.semicond.recombination as rec
 from ldsim.semicond.gain import gain_2p
-from ldsim.transport import flux, vrs
+from ldsim.transport import flux
 
 
 input_params_nodes = [
@@ -236,11 +236,12 @@ class LaserDiodeModel1d(LaserDiode):
 
     def _update_current_densities(self):
         psi = self.sol['psi']
-        B_plus = flux.bernoulli((psi[1:] - psi[:-1]) / self.vb['Vt'])
-        B_minus = flux.bernoulli(-(psi[1:] - psi[:-1]) / self.vb['Vt'])
-        Bdot_plus = flux.bernoulli_dot((psi[1:] - psi[:-1]) / self.vb['Vt'])
-        Bdot_minus = flux.bernoulli_dot(-(psi[1:] - psi[:-1]) / self.vb['Vt'])
-        h = self.xn[1:] - self.xn[:-1]
+        delta_psi = psi[..., 1:] - psi[..., :-1]
+        B_plus = flux.bernoulli(delta_psi / self.vb['Vt'])
+        B_minus = flux.bernoulli(-delta_psi / self.vb['Vt'])
+        Bdot_plus = flux.bernoulli_dot(delta_psi / self.vb['Vt'])
+        Bdot_minus = flux.bernoulli_dot(-delta_psi / self.vb['Vt'])
+        h = self.xn[..., 1:] - self.xn[..., :-1]
 
         if self.j_discr == 'mSG':
             jn_function = self._jn_mSG
@@ -269,7 +270,11 @@ class LaserDiodeModel1d(LaserDiode):
     def _jn_SG(self, B_plus, B_minus, Bdot_plus, Bdot_minus, h):
         "Electron current density, Scharfetter-Gummel scheme."
         psi = self.sol['psi']
+        psi_1 = psi[..., :-1]
+        psi_2 = psi[..., 1:]
         phi_n = self.sol['phi_n']
+        phi_n_1 = phi_n[..., :-1]
+        phi_n_2 = phi_n[..., 1:]
         Nc = self.vb['Nc']
         Ec = self.vb['Ec']
         Vt = self.vb['Vt']
@@ -277,14 +282,14 @@ class LaserDiodeModel1d(LaserDiode):
         q = self.q
 
         # electron densities at finite volume boundaries
-        n1 = semicond.n(psi[:-1], phi_n[:-1], Nc, Ec, Vt)
-        n2 = semicond.n(psi[1:], phi_n[1:], Nc, Ec, Vt)
+        n1 = semicond.n(psi_1, phi_n_1, Nc, Ec, Vt)
+        n2 = semicond.n(psi_2, phi_n_2, Nc, Ec, Vt)
 
         # forward (2-2) and backward (1-1) derivatives w.r.t. potentials
-        dn1_dpsi1 = semicond.dn_dpsi(psi[:-1], phi_n[:-1], Nc, Ec, Vt)
-        dn2_dpsi2 = semicond.dn_dpsi(psi[1:], phi_n[1:], Nc, Ec, Vt)
-        dn1_dphin1 = semicond.dn_dphin(psi[:-1], phi_n[:-1], Nc, Ec, Vt)
-        dn2_dphin2 = semicond.dn_dphin(psi[1:], phi_n[1:], Nc, Ec, Vt)
+        dn1_dpsi1 = semicond.dn_dpsi(psi_1, phi_n_1, Nc, Ec, Vt)
+        dn2_dpsi2 = semicond.dn_dpsi(psi_2, phi_n_2, Nc, Ec, Vt)
+        dn1_dphin1 = semicond.dn_dphin(psi_1, phi_n_1, Nc, Ec, Vt)
+        dn2_dphin2 = semicond.dn_dphin(psi_2, phi_n_2, Nc, Ec, Vt)
 
         # electron current density and its derivatives
         jn = flux.SG_jn(n1, n2, B_plus, B_minus, h, Vt, q, mu_n)
@@ -299,7 +304,11 @@ class LaserDiodeModel1d(LaserDiode):
     def _jp_SG(self, B_plus, B_minus, Bdot_plus, Bdot_minus, h):
         "Hole current density, Scharfetter-Gummel scheme."
         psi = self.sol['psi']
+        psi_1 = psi[..., :-1]
+        psi_2 = psi[..., 1:]
         phi_p = self.sol['phi_p']
+        phi_p_1 = phi_p[..., :-1]
+        phi_p_2 = phi_p[..., 1:]
         Nv = self.vb['Nv']
         Ev = self.vb['Ev']
         Vt = self.vb['Vt']
@@ -307,14 +316,14 @@ class LaserDiodeModel1d(LaserDiode):
         q = self.q
 
         # hole densities at finite bolume boundaries
-        p1 = semicond.p(psi[:-1], phi_p[:-1], Nv, Ev, Vt)
-        p2 = semicond.p(psi[1:], phi_p[1:], Nv, Ev, Vt)
+        p1 = semicond.p(psi_1, phi_p_1, Nv, Ev, Vt)
+        p2 = semicond.p(psi_2, phi_p_2, Nv, Ev, Vt)
 
         # forward (2-2) and backward derivatives w.r.t. potentials
-        dp1_dpsi1 = semicond.dp_dpsi(psi[:-1], phi_p[:-1], Nv, Ev, Vt)
-        dp2_dpsi2 = semicond.dp_dpsi(psi[1:], phi_p[1:], Nv, Ev, Vt)
-        dp1_dphip1 = semicond.dp_dphip(psi[:-1], phi_p[:-1], Nv, Ev, Vt)
-        dp2_dphip2 = semicond.dp_dphip(psi[1:], phi_p[1:], Nv, Ev, Vt)
+        dp1_dpsi1 = semicond.dp_dpsi(psi_1, phi_p_1, Nv, Ev, Vt)
+        dp2_dpsi2 = semicond.dp_dpsi(psi_2, phi_p_2, Nv, Ev, Vt)
+        dp1_dphip1 = semicond.dp_dphip(psi_1, phi_p_1, Nv, Ev, Vt)
+        dp2_dphip2 = semicond.dp_dphip(psi_2, phi_p_2, Nv, Ev, Vt)
 
         # hole current density and its derivatives
         jp = flux.SG_jp(p1, p2, B_plus, B_minus, h, Vt, q, mu_p)
@@ -339,8 +348,10 @@ class LaserDiodeModel1d(LaserDiode):
         F_dot = semicond.prob_functions.fermi_dot_approx
 
         # electron current density
-        eta_n1 = (psi[:-1] - phi_n[:-1] - Ec) / self.vn['Vt'][:-1]
-        eta_n2 = (psi[1:] - phi_n[1:] - Ec) / self.vn['Vt'][1:]
+        eta_n1 = (psi[..., :-1]
+                  - phi_n[..., :-1] - Ec) / self.vn['Vt'][..., :-1]
+        eta_n2 = (psi[..., 1:]
+                  - phi_n[..., 1:] - Ec) / self.vn['Vt'][..., 1:]
         exp_eta_n1 = np.exp(eta_n1)
         exp_eta_n2 = np.exp(eta_n2)
         gn = flux.g(eta_n1, eta_n2, F)
@@ -349,8 +360,8 @@ class LaserDiodeModel1d(LaserDiode):
         jn = jn_SG * gn
 
         # derivatives
-        gdot_n1 = flux.gdot(gn, eta_n1, F, F_dot) / self.vn['Vt'][:-1]
-        gdot_n2 = flux.gdot(gn, eta_n2, F, F_dot) / self.vn['Vt'][1:]
+        gdot_n1 = flux.gdot(gn, eta_n1, F, F_dot) / self.vn['Vt'][..., :-1]
+        gdot_n2 = flux.gdot(gn, eta_n2, F, F_dot) / self.vn['Vt'][..., 1:]
         djn_dpsi1_SG = flux.oSG_djn_dpsi1(
             exp_eta_n1, exp_eta_n2, B_minus, Bdot_plus, Bdot_minus,
             h, Nc, q, mu_n
@@ -382,8 +393,10 @@ class LaserDiodeModel1d(LaserDiode):
         F_dot = semicond.prob_functions.fermi_dot_approx
 
         # hole current density
-        eta_1 = (-psi[:-1] + phi_p[:-1] + Ev) / self.vn['Vt'][:-1]
-        eta_2 = (-psi[1:] + phi_p[1:] + Ev) / self.vn['Vt'][1:]
+        eta_1 = (-psi[..., :-1]
+                 + phi_p[..., :-1] + Ev) / self.vn['Vt'][..., :-1]
+        eta_2 = (-psi[..., 1:]
+                 + phi_p[..., 1:] + Ev) / self.vn['Vt'][..., 1:]
         exp_eta_p1 = np.exp(eta_1)
         exp_eta_p2 = np.exp(eta_2)
         gp = flux.g(eta_1, eta_2, F)
@@ -392,8 +405,8 @@ class LaserDiodeModel1d(LaserDiode):
         jp = jp_SG * gp
 
         # derivatives
-        gdot_p1 = flux.gdot(gp, eta_1, F, F_dot) / self.vn['Vt'][:-1]
-        gdot_p2 = flux.gdot(gp, eta_2, F, F_dot) / self.vn['Vt'][1:]
+        gdot_p1 = flux.gdot(gp, eta_1, F, F_dot) / self.vn['Vt'][..., :-1]
+        gdot_p2 = flux.gdot(gp, eta_2, F, F_dot) / self.vn['Vt'][..., 1:]
         djp_dpsi1_SG = flux.oSG_djp_dpsi1(
             exp_eta_p1, exp_eta_p2, B_plus, Bdot_plus, Bdot_minus,
             h, Nv, q, mu_p
@@ -502,86 +515,15 @@ class LaserDiodeModel1d(LaserDiode):
                            * dx[self.ar_ix[1:-1]])
 
     # methods for solving the drift-diffusion system
-    def _transport_system(self):
-        m = len(self.xn) - 2            # number of inner nodes
-        h = self.xn[1:] - self.xn[:-1]  # mesh steps
-        w = self.xb[1:] - self.xb[:-1]  # 1D volumes
-        R = (self.vn['R_srh'] + self.vn['R_rad'] + self.vn['R_aug'])[1:-1]
-        dR_dpsi = sum(self.vn[f'd{r}_dpsi']
-                      for r in ['Rsrh', 'Rrad', 'Raug'])[1:-1]
-        dR_dphin = sum(self.vn[f'd{r}_dphin']
-                       for r in ['Rsrh', 'Rrad', 'Raug'])[1:-1]
-        dR_dphip = sum(self.vn[f'd{r}_dphip']
-                       for r in ['Rsrh', 'Rrad', 'Raug'])[1:-1]
-
-        # aliases
-        jn = self.vb['jn']
-        jp = self.vb['jp']
-
-        # vector of residuals for van Roosbroeck-Shockley system
-        # [poisson, electron current density continuity, hole -/-]
-        residuals = np.zeros(m * 3)
-        residuals[:m] = vrs.poisson_res(
-            self.sol['psi'], self.sol['n'], self.sol['p'], h, w,
-            self.vn['eps'], self.eps_0, self.q, self.vn['C_dop']
-        )
-        residuals[m:2*m] = self.q * R * w - (jn[1:] - jn[:-1])
-        residuals[2*m:] = -self.q * R * w - (jp[1:] - jp[:-1])
-
-        # Jacobian
-        # 1. Poisson's equation
-        j11 = vrs.poisson_dF_dpsi(self.sol['dn_dpsi'], self.sol['dp_dpsi'], h,
-                                  w, self.vn['eps'], self.eps_0, self.q)
-        j12 = vrs.poisson_dF_dphin(self.sol['dn_dphin'], w, self.eps_0, self.q)
-        j13 = vrs.poisson_dF_dphip(self.sol['dp_dphip'], w, self.eps_0, self.q)
-
-        # 2. Electron current density continuity equation
-        j21 = vrs.jn_dF_dpsi(self.vb['djn_dpsi1'], self.vb['djn_dpsi2'],
-                             dR_dpsi, w, self.q, m)
-        j22 = vrs.jn_dF_dphin(self.vb['djn_dphin1'], self.vb['djn_dphin2'],
-                              dR_dphin, w, self.q, m)
-        j23 = vrs.jn_dF_dphip(dR_dphip, w, self.q, m)
-
-        # 3. Hole current continiuty equation
-        j31 = vrs.jp_dF_dpsi(self.vb['djp_dpsi1'], self.vb['djp_dpsi2'],
-                             dR_dpsi, w, self.q, m)
-        j32 = vrs.jp_dF_dphin(dR_dphin, w, self.q, m)
-        j33 = vrs.jp_dF_dphip(self.vb['djp_dphip1'], self.vb['djp_dphip2'],
-                              dR_dphip, w, self.q, m)
-
-        # collect Jacobian diagonals
-        data = np.zeros((11, 3*m))
-        data[0, 2*m:   ] = j13
-        data[1,   m:2*m] = j12
-        data[1, 2*m:   ] = j23
-        data[2,    :m  ] = j11[0]
-        data[2,   m:2*m] = j22[0]
-        data[2, 2*m:   ] = j33[0]
-        data[3,    :m  ] = j11[1]
-        data[3,   m:2*m] = j22[1]
-        data[3, 2*m:   ] = j33[1]
-        data[4,    :m  ] = j11[2]
-        data[4,   m:2*m] = j22[2]
-        data[4, 2*m:   ] = j33[2]
-        data[5,    :m  ] = j21[0]
-        data[6,    :m  ] = j21[1]
-        data[6,   m:2*m] = j32
-        data[7,    :m  ] = j21[2]
-        data[8,    :m  ] = j31[0]
-        data[9,    :m  ] = j31[1]
-        data[10,   :m  ] = j31[2]
-
-        # indices of diagonals (values stored in `data`)
-        diags = [2*m, m, 1, 0, -1, -m+1, -m, -m-1, -2*m+1, -2*m, -2*m-1]
-
-        return data, diags, residuals
-
     def _lasing_system(self):
         m = len(self.xn) - 2
         # [poisson, electron current density, hole -/-,
         #  photon density rate equation]
         residuals = np.empty(m * 3 + 1)  # [poisson, electron current]
-        data, diags, residuals[:-1] = self._transport_system()
+        data, diags, residuals[:-1] = newton.transport_system(
+            xn=self.xn, vn=self.vn, xb=self.xb, vb=self.vb, sol=self.sol,
+            q=self.q, eps_0=self.eps_0, index=None
+        )
 
         # update vector of residuals
         inds = np.where(self.ar_ix)[0] - 1
@@ -674,7 +616,10 @@ class LaserDiodeModel1d(LaserDiode):
         """
         # solve the system
         m = len(self.xn) - 2
-        data, diags, residuals = self._transport_system()
+        data, diags, residuals = newton.transport_system(
+            xn=self.xn, vn=self.vn, xb=self.xb, vb=self.vb, sol=self.sol,
+            q=self.q, eps_0=self.eps_0, index=None
+        )
         J = sparse.spdiags(data=data, diags=diags, m=m*3, n=m*3, format='csc')
         dx = sparse.linalg.spsolve(J, -residuals)
 
@@ -868,7 +813,7 @@ class LaserDiodeModel2d(LaserDiodeModel1d):
             self.n_eff[i] = rv['n_eff'][j]
             self.waveguide_function.append(rv['waveguide_function'])
 
-        if self.xn:
+        if self.xn is not None:
             self._update_waveguide_mode()
 
     def solve_lcn(self, maxiter=100, fluct=1e-8, omega=1.0):

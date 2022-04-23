@@ -2,6 +2,7 @@
 Defines a class for solving systems of equations using Newton's method.
 """
 
+from typing import Union
 import numpy as np
 from scipy.linalg import solve_banded
 from ldsim import semicond
@@ -180,3 +181,162 @@ class EquilibriumSolver1d(NewtonSolver):
         pdot = semicond.dp_dpsi(psi, 0, self.Nv, self.Ev, self.Vt)
         return eq.poisson_jac(psi, self.n, ndot, self.p, pdot, self.h, self.w,
                               self.eps, self.eps_0, self.q, self.C_dop)
+
+
+def transport_system(xn: np.ndarray, vn: dict, xb: np.ndarray, vb: dict,
+                     sol: dict, q: float, eps_0: float,
+                     index: Union[int, None] = None
+                     ) -> tuple[np.ndarray, list, np.ndarray]:
+    def get(array):
+        return array[index] if index else array
+
+    h = get(xn)[1:] - get(xn)[:-1]  # mesh steps
+    w = get(xb)[1:] - get(xb)[:-1]  # 1D volumes
+    m = len(w)                      # number of inner nodes
+
+    # recombination rate
+    R = (get(vn['R_srh']) + get(vn['R_rad']) + get(vn['R_aug']))[1:-1]
+    dR_dpsi = sum(get(vn[f'd{r}_dpsi'])
+                  for r in ['Rsrh', 'Rrad', 'Raug'])[1:-1]
+    dR_dphin = sum(get(vn[f'd{r}_dphin'])
+                   for r in ['Rsrh', 'Rrad', 'Raug'])[1:-1]
+    dR_dphip = sum(get(vn[f'd{r}_dphip'])
+                   for r in ['Rsrh', 'Rrad', 'Raug'])[1:-1]
+
+    # van Roosbroeck system residual vector
+    residuals = np.zeros(m * 3)
+    residuals[:m] = poisson_residual(
+        psi=get(sol['psi']), n=get(sol['n']), p=get(sol['p']), h=h, w=w,
+        eps=get(vn['eps']), eps_0=eps_0, q=q, C_dop=get(vn['C_dop'])
+    )
+    residuals[m:2*m] = jn_residual(jn=get(vb['jn']), R=R, w=w, q=q)
+    residuals[2*m:] = jp_residual(jp=get(vb['jp']), R=R, w=w, q=q)
+
+    # van Roosbroech system Jacobian
+    # 1. Poisson's equation
+    j11 = poisson_dF_dpsi(ndot=get(sol['dn_dpsi']), pdot=get(sol['dp_dpsi']),
+                          h=h, w=w, eps=get(vn['eps']), eps_0=eps_0, q=q)
+    j12 = poisson_dF_dphin(ndot=get(sol['dn_dphin']), w=w, eps_0=eps_0, q=q)
+    j13 = poisson_dF_dphip(pdot=get(sol['dp_dphip']), w=w, eps_0=eps_0, q=q)
+
+    # 2. Electron current density continuity equation
+    j21 = jn_dF_dpsi(get(vb['djn_dpsi1']), get(vb['djn_dpsi2']), dR_dpsi, w, q)
+    j22 = jn_dF_dphin(get(vb['djn_dphin1']), get(vb['djn_dphin2']),
+                      dR_dphin=dR_dphin, w=w, q=q)
+    j23 = jn_dF_dphip(dR_dphip=dR_dphip, w=w, q=q)
+
+    # 3. Hole current density continuity equation
+    j31 = jp_dF_dpsi(get(vb['djp_dpsi1']), get(vb['djp_dpsi2']), dR_dpsi, w, q)
+    j32 = jp_dF_dphin(dR_dphin=dR_dphin, w=w, q=q)
+    j33 = jp_dF_dphip(get(vb['djp_dphip1']), get(vb['djp_dphip2']),
+                      dR_dphip=dR_dphip, w=w, q=q)
+
+    # collect Jacobian diagonals
+    data = np.zeros((11, 3*m))
+    data[0, 2*m:   ] = j13
+    data[1,   m:2*m] = j12
+    data[1, 2*m:   ] = j23
+    data[2,    :m  ] = j11[0]
+    data[2,   m:2*m] = j22[0]
+    data[2, 2*m:   ] = j33[0]
+    data[3,    :m  ] = j11[1]
+    data[3,   m:2*m] = j22[1]
+    data[3, 2*m:   ] = j33[1]
+    data[4,    :m  ] = j11[2]
+    data[4,   m:2*m] = j22[2]
+    data[4, 2*m:   ] = j33[2]
+    data[5,    :m  ] = j21[0]
+    data[6,    :m  ] = j21[1]
+    data[6,   m:2*m] = j32
+    data[7,    :m  ] = j21[2]
+    data[8,    :m  ] = j31[0]
+    data[9,    :m  ] = j31[1]
+    data[10,   :m  ] = j31[2]
+
+    # indices of diagonals (values stored in `data`)
+    diags = [2*m, m, 1, 0, -1, -m+1, -m, -m-1, -2*m+1, -2*m, -2*m-1]
+
+    return data, diags, residuals
+
+
+def poisson_residual(psi, n, p, h, w, eps, eps_0, q, C_dop):
+    lhs = -eps[1:-1] * (
+        1 / h[1:] * psi[2:]
+        - (1 / h[1:] + 1 / h[:-1]) * psi[1:-1]
+        + 1 / h[:-1] * psi[:-2]
+    )
+    rhs = q / eps_0 * (C_dop[1:-1] - n[1:-1] + p[1:-1]) * w
+    return rhs - lhs
+
+
+# Poisson's equation
+def poisson_dF_dpsi(ndot, pdot, h, w, eps, eps_0, q):
+    m = len(ndot) - 2     # number of inner nodes
+    J = np.zeros((3, m))  # Jacobian in tridiagonal form
+    J[0, 1:] = eps[1:-2] / h[1:-1]
+    J[1, :] = (-eps[1:-1] * (1/h[1:] + 1/h[:-1])
+               + q/eps_0 * (pdot[1:-1] - ndot[1:-1]) * w)
+    J[2, :-1] = eps[2:-1] / h[1:-1]
+    return J
+
+
+def poisson_dF_dphin(ndot, w, eps_0, q):
+    return -q / eps_0 * ndot[1:-1] * w
+
+
+def poisson_dF_dphip(pdot, w, eps_0, q):
+    return q / eps_0 * pdot[1:-1] * w
+
+
+# Electron current density continuity equation
+def jn_residual(jn, R, w, q):
+    return q * R * w - (jn[1:] - jn[:-1])
+
+
+def jn_dF_dpsi(djn_dpsi1, djn_dpsi2, dR_dpsi, w, q):
+    J = np.zeros((3, len(w)))
+    J[0, 1:] = -djn_dpsi2[1:-1]
+    J[1, :] = q * dR_dpsi * w - (djn_dpsi1[1:] - djn_dpsi2[:-1])
+    J[2, :-1] = djn_dpsi1[1:-1]
+    return J
+
+
+def jn_dF_dphin(djn_dphin1, djn_dphin2, dR_dphin, w, q):
+    J = np.zeros((3, len(w)))
+    J[0, 1:] = -djn_dphin2[1:-1]
+    J[1, :] = q * dR_dphin * w - (djn_dphin1[1:] - djn_dphin2[:-1])
+    J[2, :-1] = djn_dphin1[1:-1]
+    return J
+
+
+def jn_dF_dphip(dR_dphip, w, q):
+    J = np.zeros(len(w))
+    J[:] = q * dR_dphip * w
+    return J
+
+
+# Hole current density continuity equation
+def jp_residual(jp, R, w, q):
+    return -q * R * w - (jp[1:] - jp[:-1])
+
+
+def jp_dF_dpsi(djp_dpsi1, djp_dpsi2, dR_dpsi, w, q):
+    J = np.zeros((3, len(w)))
+    J[0, 1:] = -djp_dpsi2[1:-1]
+    J[1, :] = -q * dR_dpsi * w - (djp_dpsi1[1:] - djp_dpsi2[:-1])
+    J[2, :-1] = djp_dpsi1[1:-1]
+    return J
+
+
+def jp_dF_dphin(dR_dphin, w, q):
+    J = np.zeros(len(w))
+    J[:] = -q * dR_dphin * w
+    return J
+
+
+def jp_dF_dphip(djp_dphip1, djp_dphip2, dR_dphip, w, q):
+    J = np.zeros((3, len(w)))
+    J[0, 1:] = -djp_dphip2[1:-1]
+    J[1, :] = -q * dR_dphip * w - (djp_dphip1[1:] - djp_dphip2[:-1])
+    J[2, :-1] = djp_dphip1[1:-1]
+    return J
