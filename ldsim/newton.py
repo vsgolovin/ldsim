@@ -188,7 +188,7 @@ def transport_system(xn: np.ndarray, vn: dict, xb: np.ndarray, vb: dict,
                      index: Union[int, None] = None
                      ) -> tuple[np.ndarray, list, np.ndarray]:
     def get(array):
-        return array[index] if index else array
+        return array[index] if index is not None else array
 
     h = get(xn)[1:] - get(xn)[:-1]  # mesh steps
     w = get(xb)[1:] - get(xb)[:-1]  # 1D volumes

@@ -580,11 +580,11 @@ class LaserDiodeModel1d(LaserDiode):
             V /= units.V
 
         # apply boundary conditions
-        self.sol['psi'][0] = self.vn['psi_bi'][0] - V / 2
-        self.sol['psi'][-1] = self.vn['psi_bi'][-1] + V / 2
+        self.sol['psi'][..., 0] = self.vn['psi_bi'][..., 0] - V / 2
+        self.sol['psi'][..., -1] = self.vn['psi_bi'][..., -1] + V / 2
         for phi in ('phi_n', 'phi_p'):
-            self.sol[phi][0] = -V / 2
-            self.sol[phi][-1] = V / 2
+            self.sol[phi][..., 0] = -V / 2
+            self.sol[phi][..., -1] = V / 2
         # carrier densities at boundaries should not change
 
         # track solution convergence
@@ -595,6 +595,15 @@ class LaserDiodeModel1d(LaserDiode):
         # update calculated arrays
         self._update_current_densities()
         self._update_recombination_rates()
+
+    def _solve_transport_system(self):
+        m = len(self.xn) - 2
+        data, diags, residuals = newton.transport_system(
+            xn=self.xn, vn=self.vn, xb=self.xb, vb=self.vb, sol=self.sol,
+            q=self.q, eps_0=self.eps_0, index=None
+        )
+        J = sparse.spdiags(data=data, diags=diags, m=m*3, n=m*3, format='csc')
+        return sparse.linalg.spsolve(J, -residuals)
 
     def transport_step(self, omega=0.1):
         """
@@ -615,28 +624,23 @@ class LaserDiodeModel1d(LaserDiode):
 
         """
         # solve the system
-        m = len(self.xn) - 2
-        data, diags, residuals = newton.transport_system(
-            xn=self.xn, vn=self.vn, xb=self.xb, vb=self.vb, sol=self.sol,
-            q=self.q, eps_0=self.eps_0, index=None
-        )
-        J = sparse.spdiags(data=data, diags=diags, m=m*3, n=m*3, format='csc')
-        dx = sparse.linalg.spsolve(J, -residuals)
+        dx = self._solve_transport_system()
+        m = dx.shape[-1] // 3
 
         # calculate and save fluctuation
         fluct = np.sqrt(
             np.sum(dx**2) / (
-                np.sum(self.sol['psi'][1:-1]**2)
-                + np.sum(self.sol['phi_n'][1:-1]**2)
-                + np.sum(self.sol['phi_p'][1:-1]**2)
+                np.sum(self.sol['psi'][..., 1:-1]**2)
+                + np.sum(self.sol['phi_n'][..., 1:-1]**2)
+                + np.sum(self.sol['phi_p'][..., 1:-1]**2)
             )
         )
         self.fluct.append(fluct)
 
         # update current solution
-        self.sol['psi'][1:-1] += dx[:m] * omega
-        self.sol['phi_n'][1:-1] += dx[m:2*m] * omega
-        self.sol['phi_p'][1:-1] += dx[2*m:] * omega
+        self.sol['psi'][..., 1:-1] += dx[..., :m] * omega
+        self.sol['phi_n'][..., 1:-1] += dx[..., m:2*m] * omega
+        self.sol['phi_p'][..., 1:-1] += dx[..., 2*m:] * omega
         self._update_densities()
         self._update_current_densities()
         self._update_recombination_rates()
@@ -896,3 +900,19 @@ class LaserDiodeModel2d(LaserDiodeModel1d):
             else:
                 wg_mode[i] = f(self.xn[i])
         self.vn['wg_mode'] = wg_mode
+
+    def _solve_transport_system(self):
+        mx = self.xn.shape[1] - 2
+        data = np.zeros((11, mx * 3 * self.mz))
+        residuals = np.zeros(mx * 3 * self.mz)
+        for i in range(self.mz):
+            i1 = i * mx * 3
+            i2 = i1 + mx * 3
+            data[:, i1:i2], diags, residuals[i1:i2] = newton.transport_system(
+                xn=self.xn, vn=self.vn, xb=self.xb, vb=self.vb, sol=self.sol,
+                q=self.q, eps_0=self.eps_0, index=i
+            )
+        J = sparse.spdiags(data=data, diags=diags, m=mx*3*self.mz,
+                           n=mx*3*self.mz, format='csc')
+        dx = sparse.linalg.spsolve(J, -residuals)
+        return dx.reshape((self.mz, 3 * mx))
