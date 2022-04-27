@@ -5,7 +5,7 @@ of a laser diode with design described in `sample_design.py`.
 
 import matplotlib.pyplot as plt
 from ldsim.models import LaserDiodeModel1d
-from sample_laser import layers
+from sample_laser import layers_design, AlGaAs
 
 # change default Matplotlib settings
 plt.rc('lines', linewidth=0.7)
@@ -14,8 +14,8 @@ plt.rc('figure.subplot', left=0.15, right=0.85)
 # create an instance of `LaserDiode` class
 # all parameters except for `ar_inds` (active region layer indices)
 # are actually irrelevant in this case
-ld = LaserDiodeModel1d(layers, L=0.3, w=0.01, R1=0.95, R2=0.05, lam=0.87e-4,
-                       ng=3.9, alpha_i=0.5, beta_sp=1e-5)
+ld = LaserDiodeModel1d(layers_design, AlGaAs, L=0.3, w=0.01, R1=0.95, R2=0.05, 
+                       lam=0.87e-4, ng=3.9, alpha_i=0.5, beta_sp=1e-5)
 
 # generate nonuniform mesh
 # see method docstring for detailed description
@@ -35,11 +35,11 @@ plt.ylabel('$E_g$ (eV)')
 
 # calculate waveguide mode profile
 n_modes = 3  # number of modes to find
-rv = ld.solve_waveguide(step=1e-8, n_modes=n_modes, remove_layers=(1, 1))
+mode = ld.solve_waveguide(step=1e-8, n_modes=n_modes, remove_layers=(1, 1))
 plt.figure('Waveguide mode')
 for i in range(n_modes):
-    gamma = rv['gammas'][i] * 1e2
-    plt.plot(rv['x']*1e4, rv['modes'][:, i],
+    gamma = mode['gammas'][i] * 1e2
+    plt.plot(mode['x']*1e4, mode['modes'][:, i],
              label=r'$\Gamma$ = ' + f'{gamma:.2f}%')
 plt.legend()
 plt.ylabel('Mode intensity')

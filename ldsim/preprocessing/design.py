@@ -10,7 +10,7 @@ from .waveguide import solve_wg
 
 params = ('Ev', 'Ec', 'Nd', 'Na', 'Nc', 'Nv', 'mu_n', 'mu_p', 'tau_n',
           'tau_p', 'B', 'Cn', 'Cp', 'eps', 'n_refr', 'Eg', 'C_dop',
-          'fca_e', 'fca_h', 'T')
+          'fca_e', 'fca_h', 'x', 'T')
 params_active = ('g0', 'N_tr')
 DEFAULT_TEMPERATURE = 300.0
 
@@ -143,16 +143,17 @@ class Layer:
 
 
 class LaserDiode:
-    def __init__(self, layers, L, w, R1, R2, lam, ng, alpha_i, beta_sp):
+    def __init__(self, layers_design, material, L, w, R1, R2, lam, ng, alpha_i, 
+                 beta_sp):
         """
         Class for storing laser diode parameters.
 
         Parameters
         ----------
-        layers : list
-            Layers that compose the diode (`Layer` objects).
+        layers_design : dictionary 
+            Contain layers params: names, thickness, composition, doping.
         material : material.materialAlGaAs
-            Material class with all parameters and temperature dependencies
+            Material class with all parameters and temperature dependencies.
         L : number
             Resonator length (cm).
         w : number
@@ -174,6 +175,8 @@ class LaserDiode:
 
         """
         # copy inputs
+        self.material = material
+        layers = material.setup_layers(layers_design)        
         assert all(isinstance(layer, Layer) for layer in layers)
         self.layers = list(layers)
         self.L = L

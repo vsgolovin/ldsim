@@ -12,7 +12,7 @@ from ldsim.transport import flux, vrs
 input_params_nodes = [
     'Ev', 'Ec', 'Eg', 'Nd', 'Na', 'C_dop', 'Nc', 'Nv', 'mu_n', 'mu_p',
     'tau_n', 'tau_p', 'B', 'Cn', 'Cp', 'eps', 'n_refr', 'g0', 'N_tr',
-    'fca_e', 'fca_h', 'T']
+    'fca_e', 'fca_h', 'x', 'T']
 input_params_boundaries = ['Ev', 'Ec', 'Nc', 'Nv', 'mu_n', 'mu_p', 'T']
 params_active = ['g0', 'N_tr']
 calculated_params_nodes = [
@@ -103,6 +103,7 @@ class LaserDiodeModel1d(LaserDiode):
                 continue
             self.vn[param] = self.calculate(
                 param, self.xn, z=0, inds=inds, dx=dx)
+        self.material.x_profile = self.vn['x']
         # active region
         inds, dx = inds[self.ar_ix], dx[self.ar_ix]
         for param in params_active:
@@ -179,6 +180,21 @@ class LaserDiodeModel1d(LaserDiode):
         self.sol['phi_n'] = np.zeros_like(sol.x)
         self.sol['phi_p'] = np.zeros_like(sol.x)
         self._update_densities()
+        
+    def _calc_T(self):
+        """
+        Calculate temperature distribution in active region using simple 
+        uniform disribution.
+        """
+        P = self.get_output_power()
+        I = -self.get_current()
+        V = self.get_voltage()
+        
+        #T = self.T_hs
+        # !!! if choose bigger step in voltage instead 0.01 - breaks too
+        #T += self.dT.Rt * (I*V - P)          
+        
+        pass
 
     # scale all parameters
     def make_dimensionless(self):
@@ -765,12 +781,25 @@ class LaserDiodeModel1d(LaserDiode):
         if self.is_dimensionless:
             j *= units.j
         return j
+    
+    def get_current(self):
+        j = self.get_current_density()
+        I = abs(j) * self.L * self.w
+        if self.is_dimensionless:
+            I *= units.x**2
+        return I
 
     def get_output_power(self):
         P = self.photon_energy * self.S * self.vg*self.alpha_m * self.w*self.L
         if self.is_dimensionless:
             P *= units.P
         return P
+    
+    def get_voltage(self):
+        V = self.voltage
+        if self.is_dimensionless:
+            V *= units.V        
+        return V
 
 
 class LaserDiodeModel2d(LaserDiodeModel1d):
