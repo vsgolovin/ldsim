@@ -187,6 +187,8 @@ def transport_system(xn: np.ndarray, vn: dict, xb: np.ndarray, vb: dict,
                      sol: dict, q: float, eps_0: float,
                      index: Union[int, None] = None
                      ) -> tuple[np.ndarray, list, np.ndarray]:
+    # shorthand function to access either array itself (1D model)
+    # or 1D slice of 2D array (2D model)
     def get(array):
         return array[index] if index is not None else array
 
@@ -259,6 +261,7 @@ def transport_system(xn: np.ndarray, vn: dict, xb: np.ndarray, vb: dict,
     return data, diags, residuals
 
 
+# Poisson's equation
 def poisson_residual(psi, n, p, h, w, eps, eps_0, q, C_dop):
     lhs = -eps[1:-1] * (
         1 / h[1:] * psi[2:]
@@ -269,7 +272,6 @@ def poisson_residual(psi, n, p, h, w, eps, eps_0, q, C_dop):
     return rhs - lhs
 
 
-# Poisson's equation
 def poisson_dF_dpsi(ndot, pdot, h, w, eps, eps_0, q):
     m = len(ndot) - 2     # number of inner nodes
     J = np.zeros((3, m))  # Jacobian in tridiagonal form

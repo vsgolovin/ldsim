@@ -543,7 +543,7 @@ class LaserDiodeModel1d(LaserDiode):
         data[3, m+inds] += self.q * self.vn['dRst_dphin']     # j22
         data[1, 2*m+inds] += self.q * self.vn['dRst_dphip']   # j23
         data[9, inds] += -self.q * self.vn['dRst_dpsi']       # j31
-        data[6, m+inds] += -self.q * self.vn['dRst_dphin']     # j32
+        data[6, m+inds] += -self.q * self.vn['dRst_dphin']    # j32
         data[3, 2*m+inds] += -self.q * self.vn['dRst_dphip']  # j33
         J = sparse.spdiags(data, diags, m=3*m+1, n=3*m+1, format='lil')
 
@@ -798,6 +798,26 @@ class LaserDiodeModel2d(LaserDiodeModel1d):
         self._calculate_all_params()
 
     def solve_waveguide(self, step=1e-7, n_modes=3, remove_layers=(0, 0)):
+        """
+        Calculate vertical mode profile for every vertical slice. Finds
+        `n_modes` solutions of the eigenvalue problem with the highest
+        eigenvalues (effective indices) and picks the one with the highest
+        optical confinement factor (active region overlap). This
+        implementation asserts that the found mode profiles of every slice
+        correspond to the same mode.
+
+        Parameters
+        ----------
+        step : float, optional
+            Uniform mesh step (cm).
+        n_modes : int, optional
+            Number of calculated eigenproblem solutions.
+        remove_layers : (int, int), optional
+            Number of layers to exclude from calculated refractive index
+            profile at each side of the device. Useful to exclude contact
+            layers.
+
+        """
         self.gamma = np.zeros(self.mz)
         self.n_eff = np.zeros_like(self.gamma)
         self.waveguide_function = []
@@ -902,9 +922,12 @@ class LaserDiodeModel2d(LaserDiodeModel1d):
         self.vn['wg_mode'] = wg_mode
 
     def _solve_transport_system(self):
-        mx = self.xn.shape[1] - 2
+        # initialize the system
+        mx = self.xn.shape[1] - 2  # number of inner nodes along x axis
         data = np.zeros((11, mx * 3 * self.mz))
         residuals = np.zeros(mx * 3 * self.mz)
+
+        # fill arrays
         for i in range(self.mz):
             i1 = i * mx * 3
             i2 = i1 + mx * 3
@@ -912,6 +935,8 @@ class LaserDiodeModel2d(LaserDiodeModel1d):
                 xn=self.xn, vn=self.vn, xb=self.xb, vb=self.vb, sol=self.sol,
                 q=self.q, eps_0=self.eps_0, index=i
             )
+
+        # solve the system
         J = sparse.spdiags(data=data, diags=diags, m=mx*3*self.mz,
                            n=mx*3*self.mz, format='csc')
         dx = sparse.linalg.spsolve(J, -residuals)
