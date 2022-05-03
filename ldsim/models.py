@@ -187,18 +187,24 @@ class LaserDiodeModel1d(LaserDiode):
         uniform disribution.
         """
         P = self.get_output_power()
-        I = -self.get_current()
+        I = self.get_current()
         V = self.get_voltage()
         
-        #T = self.T_hs
+        T = self.material.T_HS
         # !!! if choose bigger step in voltage instead 0.01 - breaks too
-        #T += self.dT.Rt * (I*V - P)          
+        if self.T_dependent:
+            T += self.material.dT_coeffs['Rt'] * (I*V - P)
         
-        pass
+        self.vn['T'] = np.full_like(self.vn['Vt'], T)
+        self.vb['T'] = np.full_like(self.vb['Vt'], T)            
+        self._update_Vt()
+        
+        return T
 
     # scale all parameters
     def make_dimensionless(self):
         "Make every parameter dimensionless."
+        self.voltage /= units.V
         self.xn /= units.x
         self.xb /= units.x
         self.S /= units.dct['S']
@@ -212,6 +218,7 @@ class LaserDiodeModel1d(LaserDiode):
 
     def original_units(self):
         "Convert all values back to original units."
+        self.voltage *= units.V
         self.xn *= units.x
         self.xb *= units.x
         self.S *= units.dct['S']
@@ -281,6 +288,51 @@ class LaserDiodeModel1d(LaserDiode):
         self.vb['djp_dpsi2'] = djp_dpsi2
         self.vb['djp_dphip1'] = djp_dphip1
         self.vb['djp_dphip2'] = djp_dphip2
+        
+    def _update_temperature(self):            
+        # temperature
+        self._calc_T()
+            
+        # update parameters
+        """
+        for d in (self.vn, self.vb):
+            for param in d:
+                if d[param] is not None and \
+                    param in self.material.AC_params.keys():
+                    d[param] = getattr(self.material, 'param')(
+                        self.vn['T'], x=self.material.x_profile)
+        """
+        X = self.material.x_profile
+        Xb = (X[1:] + X[:-1])/2
+        
+        self.vn['B'] = self.material.B(x=X, T=self.vn['T'])
+        self.vn['Cn'] = self.material.Cn(x=X, T=self.vn['T'])
+        self.vn['Cp'] = self.material.Cp(x=X, T=self.vn['T'])
+        self.vn['g0'] = self.material.g0(T=self.vn['T'][self.ar_ix])
+        self.vn['N_tr'] = self.material.Ntr(T=self.vn['T'][self.ar_ix])
+        self.vn['fca_e'] = self.material.fca_e(x=X, T=self.vn['T'])
+        self.vn['fca_h'] = self.material.fca_h(x=X, T=self.vn['T'])
+        self.vn['mu_n'] = self.material.mu_n(x=X, T=self.vn['T'])
+        self.vn['mu_p'] = self.material.mu_p(x=X, T=self.vn['T'])
+        self.vn['Nc'] = self.material.Nc(x=X, T=self.vn['T'])
+        self.vn['Nv'] = self.material.Nv(x=X, T=self.vn['T'])
+        self.vn['Eg'], self.vn['Ec'], self.vn['Ev'] = \
+            self.material.Eg_AlGaAs(x=X, T=self.vn['T'])
+        
+        self.vb['mu_n'] = self.material.mu_n(x=Xb, T=self.vb['T'])
+        self.vb['mu_p'] = self.material.mu_p(x=Xb, T=self.vb['T'])
+        self.vb['Nc'] = self.material.Nc(x=Xb, T=self.vb['T'])
+        self.vb['Nv'] = self.material.Nv(x=Xb, T=self.vb['T'])
+        _, self.vb['Ec'], self.vb['Ev'] = \
+            self.material.Eg_AlGaAs(x=Xb, T=self.vb['T'])
+
+        # equilibrium carrier concentrations
+        if self.iterations % 2 == 0:
+            self.solve_lcn()
+            sol = newton.EquilibriumSolver1d(self.vn, self.xn, self.xb, self.q,
+                                             self.eps_0)
+            sol.solve(100, 1e-8, 1)
+            self.vn['psi_bi'] = sol.x.copy()
 
     def _jn_SG(self, B_plus, B_minus, Bdot_plus, Bdot_minus, h):
         "Electron current density, Scharfetter-Gummel scheme."
@@ -663,7 +715,7 @@ class LaserDiodeModel1d(LaserDiode):
 
         # track solution convergence
         self.iterations = 0
-        self.fluct = []  # fluctuation for every Newton iteration
+        self.fluct = []  # fluctuation for every Newton iteration 
         self.voltage = V
 
         # update calculated arrays
@@ -690,28 +742,37 @@ class LaserDiodeModel1d(LaserDiode):
         """
         # solve the system
         m = len(self.xn) - 2
-        data, diags, residuals = self._transport_system()
-        J = sparse.spdiags(data=data, diags=diags, m=m*3, n=m*3, format='csc')
-        dx = sparse.linalg.spsolve(J, -residuals)
+        
+        self.fluct_T = [1]
+        while self.fluct_T[-1] > 1e-8:
+            
+            T_prev = self.vn['T']
+            
+            data, diags, residuals = self._transport_system()
+            J = sparse.spdiags(data=data, diags=diags, m=m*3, n=m*3, format='csc')
+            dx = sparse.linalg.spsolve(J, -residuals)
 
-        # calculate and save fluctuation
-        fluct = np.sqrt(
-            np.sum(dx**2) / (
-                np.sum(self.sol['psi'][1:-1]**2)
-                + np.sum(self.sol['phi_n'][1:-1]**2)
-                + np.sum(self.sol['phi_p'][1:-1]**2)
-            )
-        )
-        self.fluct.append(fluct)
+            # calculate and save fluctuation
+            fluct = np.sqrt(
+                np.sum(dx**2) / (
+                    np.sum(self.sol['psi'][1:-1]**2)
+                    + np.sum(self.sol['phi_n'][1:-1]**2)
+                    + np.sum(self.sol['phi_p'][1:-1]**2)
+                    )
+                )
+            self.fluct.append(fluct)
 
-        # update current solution
-        self.sol['psi'][1:-1] += dx[:m] * omega
-        self.sol['phi_n'][1:-1] += dx[m:2*m] * omega
-        self.sol['phi_p'][1:-1] += dx[2*m:] * omega
-        self._update_densities()
-        self._update_current_densities()
-        self._update_recombination_rates()
-        self.iterations += 1
+            # update current solution
+            self.sol['psi'][1:-1] += dx[:m] * omega
+            self.sol['phi_n'][1:-1] += dx[m:2*m] * omega
+            self.sol['phi_p'][1:-1] += dx[2*m:] * omega
+            
+            self._update_temperature()
+            self._update_densities()
+            self._update_current_densities()
+            self._update_recombination_rates()
+            self.fluct_T.append(np.sqrt(np.sum((T_prev - self.vn['T'])**2)))
+            self.iterations += 1
 
         return fluct
 
@@ -742,36 +803,47 @@ class LaserDiodeModel1d(LaserDiode):
         # `apply_voltage` does not calculate gain
         if len(self.fluct) == 0:
             self._update_gain()
+        
+        self.fluct_T = [1]
+        
+        while self.fluct_T[-1] > 1e-8:
+            
+            T_prev = self.vn['T']
 
-        # solve the system
-        J, residuals = self._lasing_system()
-        dx = sparse.linalg.spsolve(J, -residuals)
+            # solve the system
+            J, residuals = self._lasing_system()
+            dx = sparse.linalg.spsolve(J, -residuals)
 
-        # calculate and save fluctuation
-        fluct = np.sqrt(
-            np.sum(dx**2) / (
-                np.sum(self.sol['psi'][1:-1]**2)
-                + np.sum(self.sol['phi_n'][1:-1]**2)
-                + np.sum(self.sol['phi_p'][1:-1]**2)
-                + self.S**2
-            )
-        )
-        self.fluct.append(fluct)
+            # calculate and save fluctuation
+            fluct = np.sqrt(
+                np.sum(dx**2) / (
+                    np.sum(self.sol['psi'][1:-1]**2)
+                    + np.sum(self.sol['phi_n'][1:-1]**2)
+                    + np.sum(self.sol['phi_p'][1:-1]**2)
+                    + self.S**2
+                    )
+                )                    
 
-        # update current solution
-        m = len(self.xn) - 2
-        self.sol['psi'][1:-1] += dx[:m] * omega
-        self.sol['phi_n'][1:-1] += dx[m:2*m] * omega
-        self.sol['phi_p'][1:-1] += dx[2*m:3*m] * omega
-        if dx[-1] > 0:
-            self.S += dx[-1] * omega_S[0]
-        else:
+            # update current solution
+            m = len(self.xn) - 2
+            self.sol['psi'][1:-1] += dx[:m] * omega
+            self.sol['phi_n'][1:-1] += dx[m:2*m] * omega
+            self.sol['phi_p'][1:-1] += dx[2*m:3*m] * omega
+            #if dx[-1] > 0:
+            #    self.S += dx[-1] * omega_S[0]
+            #else:
             self.S += dx[-1] * omega_S[1]
-        self._update_densities()
-        self._update_current_densities()
-        self._update_recombination_rates()
-        self._update_gain()
-        self.iterations += 1
+              
+            self._update_temperature()
+            self._update_densities()
+            self._update_current_densities()
+            self._update_recombination_rates() 
+            self._update_gain()  
+            self.fluct.append(fluct)
+            self.fluct_T.append(np.sqrt(np.sum((T_prev - self.vn['T'])**2)))
+            self.iterations += 1
+            
+            assert fluct < 10., 'Convergency breaks! For check: -ld.get_I()'
 
         return fluct
 

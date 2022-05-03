@@ -15,7 +15,8 @@ plt.rc('figure.subplot', left=0.15, right=0.85)
 # all parameters except for `ar_inds` (active region layer indices)
 # are actually irrelevant in this case
 ld = LaserDiodeModel1d(layers_design, AlGaAs, L=0.3, w=0.01, R1=0.95, R2=0.05, 
-                       lam=0.87e-4, ng=3.9, alpha_i=0.5, beta_sp=1e-5)
+                       lam=0.87e-4, ng=3.9, alpha_i=0.5, beta_sp=1e-5, 
+                       T_dependent=True)
 
 # generate nonuniform mesh
 # see method docstring for detailed description

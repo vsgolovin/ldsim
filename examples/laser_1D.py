@@ -6,8 +6,9 @@ from sample_laser import layers_design, AlGaAs
 
 # initialize model
 ld = LaserDiodeModel1d(layers_design, AlGaAs, L=0.3, w=0.01, R1=0.95, R2=0.05, 
-                       lam=0.87e-4, ng=3.9, alpha_i=0.5, beta_sp=1e-5)
-ld.generate_nonuniform_mesh(y_ext=[0., 0.])
+                       lam=0.87e-4, ng=3.9, alpha_i=0.5, beta_sp=1e-5, 
+                       T_dependent=True)
+ld.generate_nonuniform_mesh(y_ext=[1., 1.])
 mode = ld.solve_waveguide()
 
 # find electrostatic potential and carrier densities corresponding
@@ -16,7 +17,9 @@ ld.make_dimensionless()
 ld.solve_equilibrium()
 
 # applied voltage values
-voltages = np.arange(0.0, 1.601, 0.05)
+#voltages = np.arange(0.0, 1.601, 0.1)
+voltages = np.hstack([np.arange(0, 1.0, 0.025),
+                      np.arange(1.0, 1.601, 0.01)])
 current_densities = np.zeros_like(voltages)
 output_power = np.zeros_like(voltages)
 
@@ -28,9 +31,10 @@ for i, v in enumerate(voltages):
     fluct = 1  # any value so that the first iteration is performed
     while fluct > 5e-8:
         fluct = ld.lasing_step(0.1, (1.0, 0.1))
-    print(f'{ld.iterations} iterations')
+    print(f'{ld.iterations} iterations', end=' / ')
     current_densities[i] = ld.get_current_density() * (-1)
     output_power[i] = ld.get_output_power()
+    print(f'{output_power[i]:.2f} power')
 
 ld.original_units()
 

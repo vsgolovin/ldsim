@@ -144,7 +144,7 @@ class Layer:
 
 class LaserDiode:
     def __init__(self, layers_design, material, L, w, R1, R2, lam, ng, alpha_i, 
-                 beta_sp):
+                 beta_sp, T_HS=DEFAULT_TEMPERATURE, T_dependent=True):
         """
         Class for storing laser diode parameters.
 
@@ -199,6 +199,10 @@ class LaserDiode:
         self.kb = const.kb
         self.q = const.q
         self.eps_0 = const.eps_0
+        
+        # temperature parameters
+        self.material.T_HS = T_HS
+        self.T_dependent = T_dependent
 
     def make_dimensionless(self):
         "Make every parameter dimensionless."
@@ -214,7 +218,12 @@ class LaserDiode:
         self.kb /= units.E / units.T
         self.q /= units.q
         self.eps_0 /= units.q / (units.x * units.V)
-        self.is_dimensionless = True
+        self.is_dimensionless = self.material.is_dimensionless = True
+        # temperature parameters
+        self.material.T_HS /= units.T
+        self.material.dT_coeffs['Rt'] /= units.dct['T']
+        self.material.dT_coeffs['d_g0'] /= units.dct['g0']
+        self.material.dT_coeffs['d_Ntr'] /= units.dct['N_tr']
 
     def original_units(self):
         "Convert all values back to original units."
@@ -230,7 +239,12 @@ class LaserDiode:
         self.kb = const.kb
         self.q = const.q
         self.eps_0 = const.eps_0
-        self.is_dimensionless = False
+        self.is_dimensionless = self.material.is_dimensionless = False
+        # temperature parameters
+        self.material.T_HS *= units.T
+        self.material.dT_coeffs['Rt'] *= units.dct['T']
+        self.material.dT_coeffs['d_g0'] *= units.dct['g0']
+        self.material.dT_coeffs['d_Ntr'] *= units.dct['N_tr']
 
     def get_boundaries(self):
         "Get an array of layer boundaries."
