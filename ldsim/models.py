@@ -476,7 +476,7 @@ class LaserDiodeModel1d(LaserDiode):
         )
 
     def _update_gain(self):
-        # calculate gain ind its derivatives w.r.t. carrier densities
+        "Calculate gain ind its derivatives. Compatible with 2D model."
         gain, dg_dn, dg_dp = gain_2p(
             n=self.sol['n'][self.ar_ix],
             p=self.sol['p'][self.ar_ix],
@@ -497,22 +497,32 @@ class LaserDiodeModel1d(LaserDiode):
         self.vn['dg_dphin'] = dg_dn * self.sol['dn_dphin'][self.ar_ix]
         self.vn['dg_dphip'] = dg_dp * self.sol['dp_dphip'][self.ar_ix]
 
-        # calculate stimulated recombination rate and its derivatives
-        dx = self.xb[1:] - self.xb[:-1]
-        T = self.vn['wg_mode']
-        k = self.vg * dx[self.ar_ix[1:-1]] * T[self.ar_ix]
-        self.vn['R_st'] = k * gain * self.S
-        self.vn['dRst_dpsi'] = k * self.vn['dg_dpsi'] * self.S
-        self.vn['dRst_dphin'] = k * self.vn['dg_dphin'] * self.S
-        self.vn['dRst_dphip'] = k * self.vn['dg_dphip'] * self.S
-        self.vn['dRst_dS'] = k * gain
+    def _update_fca(self):
+        "Calculate free-carrier absorption. Compatible with 2D model."
+        self.vn['fca'] = (
+            (self.sol['n']*self.vn['fca_e'] + self.sol['p']*self.vn['fca_h'])
+            * self.vn['wg_mode'])
+        self.alpha_fca = np.sum(self.vn['fca'][..., 1:-1] * (self.xb[..., 1:]
+                                - self.xb[..., :-1]), axis=-1)
 
-        # free-carrier absorption
-        self.vn['fca'] = (self.sol['n'] * self.vn['fca_e']
-                          + self.sol['p'] * self.vn['fca_h']) * T
-        self.alpha_fca = np.sum(self.vn['fca'][1:-1] * dx)
-        self.Gain = np.sum(self.vn['gain'] * T[self.ar_ix]
-                           * dx[self.ar_ix[1:-1]])
+    def _update_Rst(self, S=None):
+        "Calculate stimulated recombination rate and its derivatives."
+        dx = (self.xb[..., 1:] - self.xb[..., :-1])[self.ar_ix[..., 1:-1]]
+        k = self.vg * dx * self.vn['wg_mode'][self.ar_ix]
+        if S is None:
+            S = self.S
+        self.vn['R_st'] = k * self.vn['gain'] * S
+        self.vn['dRst_dpsi'] = k * self.vn['dg_dpsi'] * S
+        self.vn['dRst_dphin'] = k * self.vn['dg_dphin'] * S
+        self.vn['dRst_dphip'] = k * self.vn['dg_dphip'] * S
+        self.vn['dRst_dS'] = k * self.vn['gain']
+
+    def _update_gain_fca_Rst(self):
+        self._update_gain()
+        self.Gain = np.sum(self.vn['gain'] * self.vn['wg_mode'][self.ar_ix]
+                           * (self.xb[1:] - self.xb[:-1])[self.ar_ix[1:-1]])
+        self._update_fca()
+        self._update_Rst()
 
     # methods for solving the drift-diffusion system
     def _lasing_system(self):
@@ -674,7 +684,7 @@ class LaserDiodeModel1d(LaserDiode):
         """
         # `apply_voltage` does not calculate gain
         if len(self.fluct) == 0:
-            self._update_gain()
+            self._update_gain_fca_Rst()
 
         # solve the system
         J, residuals = self._lasing_system()
@@ -703,7 +713,7 @@ class LaserDiodeModel1d(LaserDiode):
         self._update_densities()
         self._update_current_densities()
         self._update_recombination_rates()
-        self._update_gain()
+        self._update_gain_fca_Rst()
         self.iterations += 1
 
         return fluct
@@ -725,8 +735,10 @@ class LaserDiodeModel1d(LaserDiode):
 class LaserDiodeModel2d(LaserDiodeModel1d):
     def __init__(self, *args,  num_slices=10, **kwargs):
         super().__init__(*args, **kwargs)
-        self.zn = None
-        self.zb = None
+        self.zn = None  # longitudinal (z) axis nodes
+        self.zb = None  # z axis volume boundaries
+        self.Sf = None  # forward propagating photon densities at `zb`
+        self.Sb = None  # backward -/-
         self.set_number_of_slices(num_slices)
 
     def set_number_of_slices(self, m: int):
@@ -736,6 +748,22 @@ class LaserDiodeModel2d(LaserDiodeModel1d):
         self.mz = m
         self.alpha_fca = np.zeros(m)
         self.Gain = np.zeros(m)
+        self.Sf = np.ones(m + 1) * 1e-12
+        self.Sb = np.ones(m + 1) * 1e-12
+        self.S = np.ones(m) * 1e-12
+
+    # scale all parameters
+    def make_dimensionless(self):
+        "Make every parameter dimensionless."
+        self.Sf /= units.dct['S']
+        self.Sb /= units.dct['S']
+        return super().make_dimensionless()
+
+    def original_units(self):
+        "Convert all values back to original units."
+        self.Sf *= units.dct['S']
+        self.Sb *= units.dct['S']
+        return super().original_units()
 
     def generate_nonuniform_mesh(self, method='first', step_uni=5e-8,
                                  step_min=1e-7, step_max=20e-7, sigma=100e-7,
@@ -920,6 +948,17 @@ class LaserDiodeModel2d(LaserDiodeModel1d):
             else:
                 wg_mode[i] = f(self.xn[i])
         self.vn['wg_mode'] = wg_mode
+
+    def _update_gain_fca_Rst(self):
+        self._update_gain()
+        mxa = len(self.vn['gain']) // self.mz
+        assert np.allclose(self.ar_ix.sum(axis=1), mxa)
+        Gain = (self.vn['gain'] * self.vn['wg_mode'][self.ar_ix]
+                * (self.xb[:, 1:] - self.xb[:, :-1])[self.ar_ix[:, 1:-1]])
+        self.Gain = Gain.reshape(self.mz, mxa).sum(axis=0)
+        self._update_fca()
+        self._update_Rst(S=np.array([[self.S[k]] * np.sum(self.ar_ix[k])
+                                     for k in range(self.mz)]).ravel())
 
     def _solve_transport_system(self):
         # initialize the system
