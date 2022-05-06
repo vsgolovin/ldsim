@@ -1,4 +1,5 @@
 import warnings
+import itertools
 import numpy as np
 from scipy import sparse
 from ldsim.preprocessing.design import LaserDiode
@@ -951,11 +952,14 @@ class LaserDiodeModel2d(LaserDiodeModel1d):
 
     def _update_gain_fca_Rst(self):
         self._update_gain()
-        mxa = len(self.vn['gain']) // self.mz
-        assert np.allclose(self.ar_ix.sum(axis=1), mxa)
+        mxa = self.ar_ix.sum(axis=1)
         Gain = (self.vn['gain'] * self.vn['wg_mode'][self.ar_ix]
                 * (self.xb[:, 1:] - self.xb[:, :-1])[self.ar_ix[:, 1:-1]])
-        self.Gain = Gain.reshape(self.mz, mxa).sum(axis=0)
+        self.Gain = np.zeros(self.mz)
+        i1 = 0
+        for k in range(self.mz):
+            self.Gain[k] = np.sum(Gain[i1:i1+mxa[k]])
+            i1 += mxa[k]
         self._update_fca()
         self._update_Rst(S=np.array([[self.S[k]] * np.sum(self.ar_ix[k])
                                      for k in range(self.mz)]).ravel())
@@ -980,3 +984,199 @@ class LaserDiodeModel2d(LaserDiodeModel1d):
                            n=mx*3*self.mz, format='csc')
         dx = sparse.linalg.spsolve(J, -residuals)
         return dx.reshape((self.mz, 3 * mx))
+
+    def _lasing_system(self):
+        mx = self.xn.shape[1] - 2
+        mxa = np.array([self.ar_ix[k].sum() for k in range(self.mz)])
+        mz = self.mz
+
+        # initialize Jacobian matrix
+        # drift-diffusion system (F1, F2, F3)
+        data = np.zeros((11, 3*mx*mz))     # J11-J33 (transport)
+        J24 = np.zeros(sum(mxa))           # J24 = -J34
+        # photon density (Sb and Sf) rate equations (F4, F5)
+        J44 = np.zeros((2*mz, 2*mz))       # derivatives w.r.t. Sf/Sb
+
+        # initialize vector of residuals
+        residuals = np.zeros(3*mx*mz + 2*mz)
+
+        # stuff
+        w = self.xb[:, 1:] - self.xb[:, :-1]
+        wM = w[self.ar_ix[:, 1:-1]] * self.vn['wg_mode'][self.ar_ix]
+        G = self.Gain - self.alpha_fca - self.alpha_i
+        dz = self.L / self.mz
+        Sb_n = (self.Sb[:-1] + self.Sb[1:]) / 2
+        Sf_n = (self.Sf[:-1] + self.Sf[1:]) / 2
+
+        # iterate over slices
+        for k in range(mz):
+            i1 = 3 * mx * k
+            i2 = i1 + 3 * mx
+            data[:, i1:i2], diags, residuals[i1:i2] = newton.transport_system(
+                xn=self.xn, vn=self.vn, xb=self.xb, vb=self.vb, sol=self.sol,
+                q=self.q, eps_0=self.eps_0, index=k)
+
+            # Jacobian, bottom right corner (dF_4,5 / dS_b,f)
+            J44[k, k] = self.vg * (-1 / dz + G[k] / 2)
+            if k < mz - 1:
+                J44[k, k+1] = self.vg * (1 / dz + G[k] / 2)
+            else:
+                J44[mz-1, -1] = self.R2 * self.vg * (1 / dz + G[k] / 2)
+            J44[mz+k, mz+k] = self.vg * (-1 / dz + G[k] / 2)
+            if k > 0:
+                J44[mz+k, mz+k-1] = self.vg * (1 / dz + G[k] / 2)
+            else:
+                J44[mz, 0] = self.R1 * self.vg * (1 / dz + G[k] / 2)
+
+        # update vector of residuals to take into account stimulated emission
+        # drift-diffusion equations
+        inds = np.flatnonzero(self.ar_ix[:, 1:-1])
+        i = 0
+        for k, mxa_k in enumerate(mxa):
+            inds[i:i+mxa_k] += k * 2 * mx
+            i += mxa_k
+        residuals[mx+inds] += self.q * self.vn['R_st']     # R_st is 1D
+        residuals[2*mx+inds] += -self.q * self.vn['R_st']
+        # photon density rate equations
+        Rrad_dx = self.vn['R_rad'][self.ar_ix] * wM
+        Rrad_integral = np.zeros(mz)
+        i1 = 0
+        for k in range(mz):
+            Rrad_integral[k] = Rrad_dx[i1:i1+mxa[k]].sum()
+            i1 += mxa[k]
+        # Rrad_integral = (self.vn['R_rad'][self.ar_ix] * wM).sum()
+        residuals[3*mx*mz:(3*mx+1)*mz] = \
+            (self.vg * (self.Sb[1:] - self.Sb[:-1]) / dz
+             + self.vg * (self.Gain - self.alpha_fca - self.alpha_i) * Sb_n
+             + self.beta_sp * Rrad_integral / 2)
+        residuals[(3*mx+1)*mz:] = \
+            (-self.vg * (self.Sf[1:] - self.Sf[:-1]) / dz
+             + self.vg * (self.Gain - self.alpha_fca - self.alpha_i) * Sf_n
+             + self.beta_sp * Rrad_integral / 2)
+
+        # update Jacobian values
+        data[6, inds] += self.q * self.vn['dRst_dpsi']         # J21
+        data[3, mx+inds] += self.q * self.vn['dRst_dphin']     # J22
+        data[1, 2*mx+inds] += self.q * self.vn['dRst_dphip']   # J23
+        data[9, inds] += -self.q * self.vn['dRst_dpsi']        # J31
+        data[6, mx+inds] += -self.q * self.vn['dRst_dphin']    # J32
+        data[3, 2*mx+inds] += -self.q * self.vn['dRst_dphip']  # J33
+        J24[:] = self.q * self.vn['dRst_dS'] / 2
+
+        # assemble Jacobian
+        # drift-diffusion system diagonals
+        J = sparse.spdiags(data, diags, format='lil',
+                           m=3*mx*mz + 2*mz, n=3*mx*mz + 2*mz)
+
+        # rightmost columns
+        offsets = [[k] * mxa[k] for k in range(mz)]
+        offsets = np.array(list(itertools.chain(*offsets))) + 3 * mx * mz
+        for j in [0, 1, mz - 1, mz]:
+            col = np.ones_like(offsets)
+            if j == 0:
+                col[:mxa[0]] = 1 + self.R1
+            elif j == 1:
+                col[-mxa[-1]:] = 0.0
+            elif j == mz - 1:
+                col[:mxa[0]] = 0.0
+            else:
+                col[-mxa[-1]:] = 1 + self.R2
+            J[mx+inds, j+offsets] = J24 * col
+            J[2*mx+inds, j+offsets] = -J24 * col
+
+        # bottom rows
+        _Sb = [[self.Sb[k]] * mxa[k] for k in range(mz)]
+        _Sb = np.array(list(itertools.chain(*_Sb)))
+        _Sf = [[self.Sf[k]] * mxa[k] for k in range(mz)]
+        _Sf = np.array(list(itertools.chain(*_Sf)))
+        ixa = self.ar_ix
+        J[offsets, inds] = (self.beta_sp * self.vn['dRrad_dpsi'][ixa] * wM
+                            + self.vg * self.vn['dg_dpsi'] * wM * _Sb)
+        J[offsets+mz, inds] = (self.beta_sp * self.vn['dRrad_dpsi'][ixa] * wM
+                               + self.vg * self.vn['dg_dpsi'] * wM * _Sf)
+        J[offsets, mx+inds] = (self.beta_sp * self.vn['dRrad_dphin'][ixa] * wM
+                               + self.vg * self.vn['dg_dphin'] * wM * _Sb)
+        J[offsets+mz, mx+inds] = (self.beta_sp*self.vn['dRrad_dphin'][ixa] * wM
+                                  + self.vg * self.vn['dg_dphin'] * wM * _Sf)
+        J[offsets, 2*mx+inds] = (self.beta_sp*self.vn['dRrad_dphip'][ixa] * wM
+                                 + self.vg * self.vn['dg_dphip'] * wM * _Sb)
+        J[offsets+mz, 2*mx+inds] = (self.beta_sp*self.vn['dRrad_dphip'][ixa]*wM
+                                    + self.vg * self.vn['dg_dphip'] * wM * _Sf)
+
+        # bottom right corner
+        J[3*mx*mz:, 3*mx*mz:] = J44
+
+        return J.tocsc(), residuals
+
+    def lasing_step(self, omega=0.1, omega_S=(1.0, 0.1)):
+        """
+        Perform a single Newton step for the lasing problem -- combination
+        of the transport problem with the photon density rate equation.
+        As a result,  solution vector `x` (all potentials and photon
+        densities) is updated by `dx` with damping parameter `omega`,
+        i.e. `x += omega * dx`.
+
+        Parameters
+        ----------
+        omega : float
+            Damping parameter for potentials.
+        omega_S : (float, float)
+            Damping parameter for photon density `S`. First value is used
+            for increasing `S`, second -- for decreasing `S`.
+            Separate values are needed to prevent `S` converging to a
+            negative value near threshold.
+
+        Returns
+        -------
+        fluct : number
+            Solution fluctuation, i.e. ratio of `dx` and `x` L2 norms.
+
+        """
+        # `apply_voltage` does not calculate gain
+        if len(self.fluct) == 0:
+            self._update_gain_fca_Rst()
+
+        # solve the system
+        J, residuals = self._lasing_system()
+        dx = sparse.linalg.spsolve(J, -residuals)
+
+        # calculate and save fluctuation
+        fluct = np.sqrt(
+            np.sum(dx**2) / (
+                np.sum(self.sol['psi'][:, 1:-1]**2)
+                + np.sum(self.sol['phi_n'][:, 1:-1]**2)
+                + np.sum(self.sol['phi_p'][:, 1:-1]**2)
+                + np.sum(self.Sb[:-1]**2)
+                + np.sum(self.Sf[1:]**2)
+            )
+        )
+        self.fluct.append(fluct)
+
+        # update current solution
+        # potentials
+        m = self.xn.shape[1] - 2
+        for k in range(self.mz):
+            i1 = 3*m*k
+            self.sol['psi'][k, 1:-1] += dx[i1:i1+m] * omega
+            self.sol['phi_n'][k, 1:-1] += dx[i1+m:i1+2*m] * omega
+            self.sol['phi_p'][k, 1:-1] += dx[i1+2*m:i1+3*m] * omega
+
+        # photon densities
+        dx_S = dx[-2*self.mz:]
+        ix = (dx_S[:self.mz] > 0)
+        self.Sb[:-1][ix] += dx_S[:self.mz][ix] * omega_S[0]
+        self.Sb[:-1][~ix] += dx_S[:self.mz][~ix] * omega_S[1]
+        ix = (dx_S[self.mz:] > 0)
+        self.Sf[1:][ix] += dx_S[self.mz:][ix] * omega_S[0]
+        self.Sf[1:][~ix] += dx_S[self.mz:][~ix] * omega_S[1]
+        self.Sb[-1] = self.Sf[-1] * self.R2  # BC
+        self.Sf[0] = self.Sb[0] * self.R1
+        self.S = (self.Sf[:-1] + self.Sf[1:] + self.Sb[:-1] + self.Sb[1:]) / 2
+
+        self._update_densities()
+        self._update_current_densities()
+        self._update_recombination_rates()
+        self._update_gain_fca_Rst()
+        self.iterations += 1
+
+        return fluct
