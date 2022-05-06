@@ -197,8 +197,7 @@ class LaserDiode:
 
     def make_dimensionless(self):
         "Make every parameter dimensionless."
-        if self.is_dimensionless:
-            return
+        assert not self.is_dimensionless
         self.L /= units.x
         self.w /= units.x
         self.lam /= units.x
@@ -213,8 +212,7 @@ class LaserDiode:
 
     def original_units(self):
         "Convert all values back to original units."
-        if not self.is_dimensionless:
-            return
+        assert self.is_dimensionless
         self.L *= units.x
         self.w *= units.x
         self.lam *= units.x
