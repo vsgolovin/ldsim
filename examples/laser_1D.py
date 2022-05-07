@@ -27,19 +27,26 @@ for i, v in enumerate(voltages):
     # store previous solution fluctuation
     fluct = 1  # any value so that the first iteration is performed
     while fluct > 5e-8:
-        fluct = ld.lasing_step(0.1, (1.0, 0.1))
+        if fluct > 1e-3:
+            omega = 0.1
+        else:
+            omega = 0.25
+        fluct = ld.lasing_step(omega, (1.0, omega))
     print(f'{ld.iterations} iterations')
+
+    # save results
     current_densities[i] = ld.get_current_density() * (-1)
     output_power[i] = ld.get_output_power()
 
 ld.original_units()
 
+# plot results
 plt.figure('J-V curve')
 plt.plot(voltages, current_densities * 1e-3, 'b.-')
 plt.xlabel('Voltage (V)')
 plt.ylabel('Current density (kA/cm$^2$)')
 
-currents = current_densities * ld.w * ld.L
+currents = current_densities * ld.w * ld.L  # can also use `.get_current()`
 plt.figure('P-I curve')
 plt.plot(currents, output_power, 'b.-')
 plt.xlabel('Current (A)')

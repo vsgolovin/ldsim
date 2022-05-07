@@ -184,29 +184,31 @@ class LaserDiodeModel1d(LaserDiode):
     # scale all parameters
     def make_dimensionless(self):
         "Make every parameter dimensionless."
+        super().make_dimensionless()
         self.xn /= units.x
         self.xb /= units.x
         self.S /= units.dct['S']
         self.alpha_fca /= 1 / units.x
         self.Gain /= 1 / units.x
+        self.voltage /= units.V
         for d in (self.vn, self.vb, self.sol):
             for param in d:
                 if d[param] is not None and param in units.dct:
                     d[param] /= units.dct[param]
-        return super().make_dimensionless()
 
     def original_units(self):
         "Convert all values back to original units."
+        super().original_units()
         self.xn *= units.x
         self.xb *= units.x
         self.S *= units.dct['S']
         self.alpha_fca *= 1 / units.x
         self.Gain *= 1 / units.x
+        self.voltage *= units.V
         for d in (self.vn, self.vb, self.sol):
             for param in d:
                 if d[param] is not None and param in units.dct:
                     d[param] *= units.dct[param]
-        return super().original_units()
 
     # methods for updating arrays usign currently defined potentials
     def _update_waveguide_mode(self):
@@ -721,12 +723,21 @@ class LaserDiodeModel1d(LaserDiode):
 
     # additional getters
     def get_current_density(self):
-        j = (self.vb['jn'] + self.vb['jp']).mean()
+        "Get current density through device (A/cm2)."
+        j = (self.vb['jn'] + self.vb['jp']).mean(axis=-1)
         if self.is_dimensionless:
             j *= units.j
         return j
 
+    def get_current(self):
+        "Get current through device (A)."
+        area = self.w * self.L
+        if self.is_dimensionless:
+            area *= units.x**2
+        return self.get_current_density() * area
+
     def get_output_power(self):
+        "Get output power from both facets (W)."
         P = self.photon_energy * self.S * self.vg*self.alpha_m * self.w*self.L
         if self.is_dimensionless:
             P *= units.P
