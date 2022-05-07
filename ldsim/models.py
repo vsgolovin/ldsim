@@ -1,3 +1,5 @@
+from typing import Iterable, NoReturn
+from copy import deepcopy
 import warnings
 import itertools
 import numpy as np
@@ -721,7 +723,8 @@ class LaserDiodeModel1d(LaserDiode):
 
         return fluct
 
-    # additional getters
+    # getters and methods for exporting data
+    # all returned values are in original units
     def get_current_density(self):
         "Get current density through device (A/cm2)."
         j = (self.vb['jn'] + self.vb['jp']).mean(axis=-1)
@@ -742,6 +745,99 @@ class LaserDiodeModel1d(LaserDiode):
         if self.is_dimensionless:
             P *= units.P
         return P
+
+    def get_recombination_current_density(self, s: str = 'rad'):
+        dx = self.xb[..., 1:] - self.xb[..., :-1]
+        if s == 'srh':
+            R = self.vn['R_srh'][..., 1:-1]
+        elif s == 'rad':
+            R = self.vn['R_rad'][..., 1:-1]
+        elif s == 'aug':
+            R = self.vn['R_aug'][..., 1:-1]
+        else:
+            raise ValueError('Unknown spontaneous recombination mechanism '
+                             + f'{s}.')
+        j = self.q * np.sum(R * dx, axis=-1)
+        if self.is_dimensionless:
+            j *= units.j
+        return j
+
+    def get_recombination_current(self, s: str = 'rad'):
+        """
+        Get current (A) associated with spontaneous recombination
+        mechanism `s`. This parameter should be one of:
+          - `'srh'` -- Shockley-Read-Hall recombination,
+          - `'rad'` -- radiative recombination,
+          - `'aug'` -- Auger recombination.
+        """
+        area = self.w * self.L
+        if self.is_dimensionless:
+            area *= units.x**2
+        return self.get_recombination_current_density(s) * area
+
+    def get_loss(self):
+        """
+        Get total internal absorption (1/cm), i.e. user-specified base
+        absorption level `alpha_i` plus free-carrier absorbtion `alpha_fca`.
+        Does not include output loss.
+        """
+        alpha = self.alpha_fca + self.alpha_i
+        return alpha * 1/units.x if self.is_dimensionless else alpha
+
+    def get_nodes(self):
+        "Get coordinates of mesh nodes (cm)."
+        return self.xn*units.x if self.is_dimensionless else deepcopy(self.xn)
+
+    def get_potential(self):
+        "Get electrostatic potential (V)."
+        if self.is_dimensionless:
+            return self.sol['psi'] * units.V
+        return deepcopy(self.sol['psi'])
+
+    def get_Ec_Ev(self):
+        "Get conduction band bottom and valence band top (eV)."
+        Ec = self.vn['Ec'] - self.sol['psi']
+        Ev = self.vn['Ev'] - self.sol['psi']
+        if self.is_dimensionless:
+            Ec *= units.E
+            Ev *= units.E
+        return Ec, Ev
+
+    def get_carrier_densities(self):
+        "Get distributions of electron and hole densities."
+        k = 1 / (units.x**3) if self.is_dimensionless else 1.0
+        return (self.sol['n']*k, self.sol['p']*k)
+
+    def get_fermi_levels(self):
+        "Get electron and hole quasi-Fermi levels."
+        fn = -self.sol['phi_n']
+        fp = -self.sol['phi_p']
+        return (fn*units.E, fp*units.E) if self.is_dimensionless else (fn, fp)
+
+    @staticmethod
+    def save_csv(fname: str, arrays: Iterable[np.ndarray],
+                 labels: Iterable[str], sep: str = ',') -> NoReturn:
+        with open(fname, 'w') as outfile:
+            outfile.write(sep.join(labels))  # header
+            for vals in zip(*arrays):        # 1D, same length
+                outfile.write('\n')
+                outfile.write(sep.join(map('{:e}'.format, vals)))
+
+    def save_results(self, fname: str, sep: str = ',',
+                     x_to_um: bool = True) -> NoReturn:
+        x = self.get_nodes()
+        if x_to_um:
+            x *= 1e4
+        jn = np.pad(self.vb['jn'], 1, mode='edge')
+        jp = np.pad(self.vb['jp'], 1, mode='edge')
+        if self.is_dimensionless:
+            jn *= units.j
+            jp *= units.j
+        labels = ['x', 'Ec', 'Ev', 'fn', 'fp', 'n', 'p', 'psi', 'jn', 'jp']
+        arrays = [x, *(self.get_Ec_Ev()), *(self.get_fermi_levels()),
+                  *(self.get_carrier_densities()), self.get_potential(),
+                  jn, jp]
+        return self.save_csv(fname, arrays, labels, sep)
 
 
 class LaserDiodeModel2d(LaserDiodeModel1d):
