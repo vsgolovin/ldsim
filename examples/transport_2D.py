@@ -6,7 +6,7 @@ from sample_laser import layers
 
 # initialize model
 ld = LaserDiodeModel2d(layers, L=0.3, w=0.01, R1=0.95, R2=0.05, lam=0.87e-4,
-                       ng=3.9, alpha_i=0.5, beta_sp=1e-5, num_slices=20)
+                       ng=3.9, alpha_i=0.5, beta_sp=1e-5, num_slices=10)
 ld.generate_nonuniform_mesh(y_ext=[0., 0.])
 mode = ld.solve_waveguide()
 
@@ -28,7 +28,7 @@ for i, v in enumerate(voltages):
     while fluct > 1e-8:
         fluct = ld.transport_step(0.1)
     print(f'{len(ld.fluct)} iterations')
-    current_densities[i] = ld.get_current_density() * (-1)
+    current_densities[i] = ld.get_current_density().mean() * (-1)
 
 ld.original_units()
 
