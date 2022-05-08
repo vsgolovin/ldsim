@@ -1,4 +1,4 @@
-from typing import Iterable, NoReturn
+from typing import Iterable, NoReturn, Tuple
 from copy import deepcopy
 import warnings
 import itertools
@@ -746,6 +746,13 @@ class LaserDiodeModel1d(LaserDiode):
             P *= units.P
         return P
 
+    def get_Sb_Sf(self):
+        "Get densities of backward- and forward-propagating photons."
+        k = 1 / units.x**2 if self.is_dimensionless else 1.0
+        Sb = (self.Sb[1:] + self.Sb[:-1]) / 2
+        Sf = (self.Sf[1:] + self.Sf[:-1]) / 2
+        return Sb * k, Sf * k
+
     def get_recombination_current_density(self, s: str = 'rad'):
         dx = self.xb[..., 1:] - self.xb[..., :-1]
         if s == 'srh':
@@ -808,6 +815,18 @@ class LaserDiodeModel1d(LaserDiode):
         k = 1 / (units.x**3) if self.is_dimensionless else 1.0
         return (self.sol['n']*k, self.sol['p']*k)
 
+    def get_carrier_densities_active(self) -> Tuple[float, float]:
+        "Get average electron and hole densities in the active region."
+        dx = self.xb[..., 1:] - self.xb[..., :-1]
+        if self.is_dimensionless:
+            dx *= units.x
+        mask = np.bool8(self.ar_ix[..., 1:-1])
+        n, p = self.get_carrier_densities()
+        d_ar = np.sum(dx * mask, axis=-1)  # active region total thickness
+        n_avg = np.sum(n[..., 1:-1] * dx * mask, axis=-1) / d_ar
+        p_avg = np.sum(p[..., 1:-1] * dx * mask, axis=-1) / d_ar
+        return n_avg, p_avg
+
     def get_fermi_levels(self):
         "Get electron and hole quasi-Fermi levels."
         fn = -self.sol['phi_n']
@@ -863,15 +882,19 @@ class LaserDiodeModel2d(LaserDiodeModel1d):
     # scale all parameters
     def make_dimensionless(self):
         "Make every parameter dimensionless."
+        super().make_dimensionless()
         self.Sf /= units.dct['S']
         self.Sb /= units.dct['S']
-        return super().make_dimensionless()
+        self.zn /= units.x
+        self.zb /= units.x
 
     def original_units(self):
         "Convert all values back to original units."
+        super().original_units()
         self.Sf *= units.dct['S']
         self.Sb *= units.dct['S']
-        return super().original_units()
+        self.zn *= units.x
+        self.zb *= units.x
 
     def generate_nonuniform_mesh(self, method='first', step_uni=5e-8,
                                  step_min=1e-7, step_max=20e-7, sigma=100e-7,
@@ -1107,7 +1130,6 @@ class LaserDiodeModel2d(LaserDiodeModel1d):
         # initialize vector of residuals
         residuals = np.zeros(3*mx*mz + 2*mz)
 
-        # stuff
         w = self.xb[:, 1:] - self.xb[:, :-1]
         wM = w[self.ar_ix[:, 1:-1]] * self.vn['wg_mode'][self.ar_ix]
         G = self.Gain - self.alpha_fca - self.alpha_i
@@ -1287,3 +1309,76 @@ class LaserDiodeModel2d(LaserDiodeModel1d):
         self.iterations += 1
 
         return fluct
+
+    def _j_to_current(self, j: np.ndarray) -> float:
+        dz = self.zb[1:, 0] - self.zb[:-1, 0]
+        dA = dz * self.w
+        if self.is_dimensionless:
+            dA *= units.x**2
+        return np.sum(j * dA)
+
+    def get_current(self) -> float:
+        "Get current through device (A)."
+        return self._j_to_current(self.get_current_density())
+
+    def get_output_power(self) -> np.ndarray:
+        "Get output power from both facets separately (W)."
+        P = np.zeros(2)
+        P[0] = self.photon_energy * self.vg * self.Sb[0]*(1-self.R1) * self.w
+        P[1] = self.photon_energy * self.vg * self.Sf[-1]*(1-self.R2) * self.w
+        if self.is_dimensionless:
+            P *= units.P
+        return P
+
+    def get_nodes(self) -> Tuple[np.ndarray, np.ndarray]:
+        "Get 2D coordinates (x, z) of mesh nodes (cm)."
+        k = units.x if self.is_dimensionless else 1.0
+        return self.xn * k, self.zn * k
+
+    def get_recombination_current(self, s: str = 'rad'):
+        """
+        Get current (A) associated with spontaneous recombination
+        mechanism `s`. This parameter should be one of:
+          - `'srh'` -- Shockley-Read-Hall recombination,
+          - `'rad'` -- radiative recombination,
+          - `'aug'` -- Auger recombination.
+        """
+        return self._j_to_current(self.get_recombination_current_density(s))
+
+    def save_results(self, fname: str, sep: str = ',',
+                     x_to_um: bool = True) -> NoReturn:
+        def pad(arr: np.ndarray) -> np.ndarray:
+            out = np.zeros_like(self.xn)
+            out[:, 1:-1] = arr
+            out[:, 0] = out[:, 1]
+            out[:, -1] = out[:, -2]
+            return out
+
+        x, z = self.get_nodes()
+        if x_to_um:
+            x *= 1e4
+            z *= 1e4
+        jn = pad((self.vb['jn'][:, 1:] + self.vb['jn'][:, :-1]) / 2)
+        jp = pad((self.vb['jp'][:, 1:] + self.vb['jp'][:, :-1]) / 2)
+        if self.is_dimensionless:
+            jn *= units.j
+            jp *= units.j
+        labels = ['x', 'z', 'Ec', 'Ev', 'fn', 'fp', 'n', 'p', 'psi', 'jn', 'jp']
+        arrays = [x, z, *(self.get_Ec_Ev()), *(self.get_fermi_levels()),
+                  *(self.get_carrier_densities()), self.get_potential(),
+                  jn, jp]
+        return self.save_csv(fname, map(np.ravel, arrays), labels, sep)
+
+    def save_fz_curves(self, fname: str, sep: str = ',',
+                       x_to_um: bool = True) -> NoReturn:
+        z = self.get_nodes()[1][:, 0]  # asserts same spacing everywhere
+        if x_to_um:
+            z *= 1e4
+        labels = ('z', 'j', 'Sb', 'Sf', 'n', 'p',
+                  'alpha_i', 'j_srh', 'j_rad', 'j_aug')
+        arrays = (z, self.get_current_density(),  *self.get_Sb_Sf(),
+                  *self.get_carrier_densities_active(), self.get_loss(),
+                  self.get_recombination_current_density('srh'),
+                  self.get_recombination_current_density('rad'),
+                  self.get_recombination_current_density('aug'))
+        return self.save_csv(fname, arrays, labels, sep)
