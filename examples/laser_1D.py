@@ -36,7 +36,7 @@ alpha_i = np.zeros_like(voltages)
 # solve the drift-diffusion problem for every voltage
 print('Voltage Iterations Power')
 for i, v in enumerate(voltages):
-    print(f' {v:.3f}   ', end='')
+    print(f' {v:.3f}    ', end='')
     ld.apply_voltage(v)
     # store previous solution fluctuation
     fluct = 1  # any value so that the first iteration is performed
@@ -60,7 +60,7 @@ for i, v in enumerate(voltages):
     fname = path.join(EXPORT_FOLDER, fname)
     ld.save_results(fname)
 
-    print('{:5d}     {:.1e}'.format(ld.iterations, output_power[i]))
+    print('{:5d}    {:.1e}'.format(ld.iterations, output_power[i]))
 
 ld.original_units()
 currents = current_densities * ld.w * ld.L  # can also use `.get_current()`
