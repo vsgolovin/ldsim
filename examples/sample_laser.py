@@ -2,59 +2,53 @@
 Sample laser design.
 """
 
-from ldsim.preprocessing.design import Layer, LaserDiode
+from ldsim.preprocessing.design import LaserDiode, DEFAULT_TEMPERATURE
+from ldsim.preprocessing.material import material_AlGaAs
+
+#%% Specify layers properties
+# 'grad' - means that property changing (linearly) from previous layer to next
+
+# layers names
+layers = ['n_contact', 'grad', 'n_cladding', 'grad', 'n_waveguide',
+          'active', 'p_waveguide', 'grad', 'p_cladding', 'grad', 'p_contact']
+
+# layers thickness in microns
+d = [0.25, 0.1, 1.4, 0.1, 0.45, 0.03, 0.45, 0.1, 1.4, 0.1, 0.25]
+d = [i*1e-4 for i in d]
+
+# composition: X for Al(x)Ga(1-x)As
+x = [0, 'grad', 0.4, 'grad', 0.25, 0, 0.25, 'grad', 0.4, 'grad', 0]
+
+# doping profiles
+Nd = [1e18, 'grad', 5e17, 'grad', 1e17, 2e16, 0, 'grad', 0, 'grad', 0]
+Na = [0, 'grad', 0, 'grad', 0, 0, 1e17, 'grad', 1e18, 'grad', 2e18]
+
+layers_design = dict(names=layers, thickness=d, x=x, Nd=Nd, Na=Na)
+assert len(d) == len(x) == len(Nd) == len(Na) == len(layers), \
+'All lengths should be equal!'
+
+#%% Define material parameters 
+
+# material parameters for binary compounds: AlAs and GaAs
+AlAs = dict(Eg=3.1, m_e=0.15, m_h=0.7, tau_n=5e-9, tau_p=5e-9, B=1e-10, 
+            Cn=2e-30, Cp=2e-30, fca_e=4e-18, fca_h=12e-18)
+GaAs = dict(Eg=1.424, m_e=0.063, m_h=0.51, tau_n=5e-9, tau_p=5e-9, B=1e-10, 
+            Cn=2e-30, Cp=2e-30, fca_e=4e-18, fca_h=12e-18)
+ar_params = dict(g0=1500, N_tr=1.85e18)  # active region params
+
+# temperature dependence coefficients of model parameters (for GaAs)
+# _p - power dependence, _Ea - activation energy,
+# Rt - temperature resistance
+dT_AlGaAs = dict(Eg_A=-5.41e-4, Eg_B=204, mu_n_P=-1, mu_p_P=-2, B_P=-1, 
+                 C_Ea=0.1, fca_e_P=1, fca_h_P=2, d_g0=-2, d_Ntr=2e15, Rt=2)
+
+#%% Setup layers
+AlGaAs = material_AlGaAs(DEFAULT_TEMPERATURE, AlAs, GaAs, ar_params, dT_AlGaAs)
+
+laser = LaserDiode(layers_design, AlGaAs, L=0.3, w=0.01, R1=0.95, R2=0.05, 
+                   lam=0.87e-4, ng=3.9, alpha_i=0.5, beta_sp=1e-5, 
+                   T_HS=DEFAULT_TEMPERATURE, T_dependent=True)
 
 
-# material parameters for different AlGaAs alloys
-d0 = dict(Ev=0.0, Ec=1.424, Nc=4.7e17, Nv=9.0e18, mu_n=8000, mu_p=370,
-          tau_n=5e-9, tau_p=5e-9, B=1e-10, Cn=2e-30, Cp=2e-30,
-          eps=12.9, n_refr=3.493, fca_e=4e-18, fca_h=12e-18)
-d25 = dict(Ev=-0.125, Ec=1.611, Nc=6.1e17, Nv=1.1e19, mu_n=3125, mu_p=174,
-           tau_n=5e-9, tau_p=5e-9, B=1e-10, Cn=2e-30, Cp=2e-30,
-           eps=12.19, n_refr=3.443, fca_e=4e-18, fca_h=12e-18)
-d40 = dict(Ev=-0.2, Ec=1.724, Nc=7.5e17, Nv=1.2e19, mu_n=800, mu_p=100,
-           tau_n=5e-9, tau_p=5e-9, B=1e-10, Cn=2e-30, Cp=2e-30,
-           eps=11.764, n_refr=3.351, fca_e=4e-18, fca_h=12e-18)
 
 
-# create Layer objects
-ncont = Layer(name='n-contact', thickness=0.25e-4)
-ncont.update(d0)
-ncont.update({'Nd': 1e18})
-
-ncl = Layer(name='n-cladding', thickness=1.4e-4)
-ncl.update(d40)
-ncl.update({'Nd': 5e17})
-
-ngrad2 = ncont.make_gradient_layer(ncl, 'gradient', 0.1e-4)
-
-nwg = Layer(name='n-waveguide', thickness=0.45e-4)
-nwg.update(d25)
-nwg.update({'Nd': 1e17})
-
-ngrad = ncl.make_gradient_layer(nwg, 'gradient', 0.1e-4)
-
-act = Layer(name='active', thickness=0.03e-4, active=True)
-act.update(d0)
-act.update({'Nd': 2e16, 'g0': 1500, 'N_tr': 1.85e18})
-
-pwg = Layer(name='p-waveguide', thickness=0.45e-4)
-pwg.update(d25)
-pwg.update({'Na': 1e17})
-
-pcl = Layer(name='p-cladding', thickness=1.4e-4)
-pcl.update(d40)
-pcl.update({'Na': 1e18})
-
-pgrad = pwg.make_gradient_layer(pcl, 'gradient', 0.1e-4)
-
-pcont = Layer(name='p-contact', thickness=0.25e-4)
-pcont.update(d0)
-pcont.update({'Na': 2e18})
-
-pgrad2 = pcl.make_gradient_layer(pcont, 'gradient', 0.1e-4)
-
-# create design as a list of layers
-layers = [ncont, ngrad2, ncl, ngrad, nwg, act, pwg, pgrad, pcl, pgrad2, pcont]
-laser = LaserDiode(layers, L=0.3, w=0.01, R1=0.95, R2=0.05, lam=0.87e-4,
-                   ng=3.9, alpha_i=0.5, beta_sp=1e-5)

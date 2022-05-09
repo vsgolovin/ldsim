@@ -15,7 +15,7 @@ from ldsim.transport import flux
 input_params_nodes = [
     'Ev', 'Ec', 'Eg', 'Nd', 'Na', 'C_dop', 'Nc', 'Nv', 'mu_n', 'mu_p',
     'tau_n', 'tau_p', 'B', 'Cn', 'Cp', 'eps', 'n_refr', 'g0', 'N_tr',
-    'fca_e', 'fca_h', 'T']
+    'fca_e', 'fca_h', 'x', 'T']
 input_params_boundaries = ['Ev', 'Ec', 'Nc', 'Nv', 'mu_n', 'mu_p', 'T']
 params_active = ['g0', 'N_tr']
 calculated_params_nodes = [
@@ -106,6 +106,7 @@ class LaserDiodeModel1d(LaserDiode):
                 continue
             self.vn[param] = self.calculate(
                 param, self.xn, z=0, inds=inds, dx=dx)
+        self.material.x_profile = self.vn['x']
         # active region
         inds, dx = inds[self.ar_ix], dx[self.ar_ix]
         for param in params_active:
@@ -187,6 +188,7 @@ class LaserDiodeModel1d(LaserDiode):
     def make_dimensionless(self):
         "Make every parameter dimensionless."
         super().make_dimensionless()
+        self.voltage /= units.V
         self.xn /= units.x
         self.xb /= units.x
         self.S /= units.dct['S']
@@ -201,6 +203,7 @@ class LaserDiodeModel1d(LaserDiode):
     def original_units(self):
         "Convert all values back to original units."
         super().original_units()
+        self.voltage *= units.V
         self.xn *= units.x
         self.xb *= units.x
         self.S *= units.dct['S']
@@ -211,6 +214,26 @@ class LaserDiodeModel1d(LaserDiode):
             for param in d:
                 if d[param] is not None and param in units.dct:
                     d[param] *= units.dct[param]
+                    
+    def _calc_T(self):
+        """
+        Calculate temperature distribution in active region using simple 
+        uniform disribution.
+        """
+        P = self.get_output_power()
+        I = self.get_current()
+        V = self.get_voltage()
+
+        T = self.material.T_HS
+        # !!! if choose bigger step in voltage instead 0.01 - breaks too
+        if self.T_dependent:
+            T += self.material.dT_coeffs['Rt'] * (I*V - P)
+
+        self.vn['T'] = np.full_like(self.vn['Vt'], T)
+        self.vb['T'] = np.full_like(self.vb['Vt'], T)            
+        self._update_Vt()
+
+        return T
 
     # methods for updating arrays usign currently defined potentials
     def _update_waveguide_mode(self):
@@ -271,6 +294,51 @@ class LaserDiodeModel1d(LaserDiode):
         self.vb['djp_dpsi2'] = djp_dpsi2
         self.vb['djp_dphip1'] = djp_dphip1
         self.vb['djp_dphip2'] = djp_dphip2
+        
+    def _update_temperature(self):            
+        # temperature
+        self._calc_T()
+
+        # update parameters
+        """
+        for d in (self.vn, self.vb):
+            for param in d:
+                if d[param] is not None and \
+                    param in self.material.AC_params.keys():
+                    d[param] = getattr(self.material, 'param')(
+                        self.vn['T'], x=self.material.x_profile)
+        """
+        X = self.material.x_profile
+        Xb = (X[1:] + X[:-1])/2
+
+        self.vn['B'] = self.material.B(x=X, T=self.vn['T'])
+        self.vn['Cn'] = self.material.Cn(x=X, T=self.vn['T'])
+        self.vn['Cp'] = self.material.Cp(x=X, T=self.vn['T'])
+        self.vn['g0'] = self.material.g0(T=self.vn['T'][self.ar_ix])
+        self.vn['N_tr'] = self.material.Ntr(T=self.vn['T'][self.ar_ix])
+        self.vn['fca_e'] = self.material.fca_e(x=X, T=self.vn['T'])
+        self.vn['fca_h'] = self.material.fca_h(x=X, T=self.vn['T'])
+        self.vn['mu_n'] = self.material.mu_n(x=X, T=self.vn['T'])
+        self.vn['mu_p'] = self.material.mu_p(x=X, T=self.vn['T'])
+        self.vn['Nc'] = self.material.Nc(x=X, T=self.vn['T'])
+        self.vn['Nv'] = self.material.Nv(x=X, T=self.vn['T'])
+        self.vn['Eg'], self.vn['Ec'], self.vn['Ev'] = \
+            self.material.Eg_AlGaAs(x=X, T=self.vn['T'])
+
+        self.vb['mu_n'] = self.material.mu_n(x=Xb, T=self.vb['T'])
+        self.vb['mu_p'] = self.material.mu_p(x=Xb, T=self.vb['T'])
+        self.vb['Nc'] = self.material.Nc(x=Xb, T=self.vb['T'])
+        self.vb['Nv'] = self.material.Nv(x=Xb, T=self.vb['T'])
+        _, self.vb['Ec'], self.vb['Ev'] = \
+            self.material.Eg_AlGaAs(x=Xb, T=self.vb['T'])
+
+        # equilibrium carrier concentrations
+        if self.iterations % 2 == 0:
+            self.solve_lcn()
+            sol = newton.EquilibriumSolver1d(self.vn, self.xn, self.xb, self.q,
+                                             self.eps_0)
+            sol.solve(100, 1e-8, 1)
+            self.vn['psi_bi'] = sol.x.copy()
 
     def _jn_SG(self, B_plus, B_minus, Bdot_plus, Bdot_minus, h):
         "Electron current density, Scharfetter-Gummel scheme."
@@ -638,28 +706,36 @@ class LaserDiodeModel1d(LaserDiode):
             Solution fluctuation, i.e. ratio of `dx` and `x` L2 norms.
 
         """
-        # solve the system
-        dx = self._solve_transport_system()
-        m = dx.shape[-1] // 3
+        self.fluct_T = [1]
+        while self.fluct_T[-1] > 1e-8:
 
-        # calculate and save fluctuation
-        fluct = np.sqrt(
-            np.sum(dx**2) / (
-                np.sum(self.sol['psi'][..., 1:-1]**2)
-                + np.sum(self.sol['phi_n'][..., 1:-1]**2)
-                + np.sum(self.sol['phi_p'][..., 1:-1]**2)
-            )
-        )
-        self.fluct.append(fluct)
+            T_prev = self.vn['T']
+        
+            # solve the system
+            dx = self._solve_transport_system()
+            m = dx.shape[-1] // 3
 
-        # update current solution
-        self.sol['psi'][..., 1:-1] += dx[..., :m] * omega
-        self.sol['phi_n'][..., 1:-1] += dx[..., m:2*m] * omega
-        self.sol['phi_p'][..., 1:-1] += dx[..., 2*m:] * omega
-        self._update_densities()
-        self._update_current_densities()
-        self._update_recombination_rates()
-        self.iterations += 1
+            # calculate and save fluctuation
+            fluct = np.sqrt(
+                np.sum(dx**2) / (
+                    np.sum(self.sol['psi'][..., 1:-1]**2)
+                    + np.sum(self.sol['phi_n'][..., 1:-1]**2)
+                    + np.sum(self.sol['phi_p'][..., 1:-1]**2)
+                    )
+                )
+
+            # update current solution
+            self.sol['psi'][..., 1:-1] += dx[..., :m] * omega
+            self.sol['phi_n'][..., 1:-1] += dx[..., m:2*m] * omega
+            self.sol['phi_p'][..., 1:-1] += dx[..., 2*m:] * omega
+            self._update_temperature()
+            self._update_densities()
+            self._update_current_densities()
+            self._update_recombination_rates()
+            
+            self.fluct.append(fluct)
+            self.fluct_T.append(np.sqrt(np.sum((T_prev - self.vn['T'])**2)))
+            self.iterations += 1
 
         return fluct
 
@@ -690,36 +766,45 @@ class LaserDiodeModel1d(LaserDiode):
         # `apply_voltage` does not calculate gain
         if len(self.fluct) == 0:
             self._update_gain_fca_Rst()
+            
+        self.fluct_T = [1]
 
-        # solve the system
-        J, residuals = self._lasing_system()
-        dx = sparse.linalg.spsolve(J, -residuals)
+        while self.fluct_T[-1] > 1e-8:
 
-        # calculate and save fluctuation
-        fluct = np.sqrt(
-            np.sum(dx**2) / (
-                np.sum(self.sol['psi'][1:-1]**2)
-                + np.sum(self.sol['phi_n'][1:-1]**2)
-                + np.sum(self.sol['phi_p'][1:-1]**2)
-                + self.S**2
-            )
-        )
-        self.fluct.append(fluct)
+            T_prev = self.vn['T']
 
-        # update current solution
-        m = len(self.xn) - 2
-        self.sol['psi'][1:-1] += dx[:m] * omega
-        self.sol['phi_n'][1:-1] += dx[m:2*m] * omega
-        self.sol['phi_p'][1:-1] += dx[2*m:3*m] * omega
-        if dx[-1] > 0:
-            self.S += dx[-1] * omega_S[0]
-        else:
-            self.S += dx[-1] * omega_S[1]
-        self._update_densities()
-        self._update_current_densities()
-        self._update_recombination_rates()
-        self._update_gain_fca_Rst()
-        self.iterations += 1
+            # solve the system
+            J, residuals = self._lasing_system()
+            dx = sparse.linalg.spsolve(J, -residuals)
+
+            # calculate and save fluctuation
+            fluct = np.sqrt(
+                 np.sum(dx**2) / (
+                     np.sum(self.sol['psi'][1:-1]**2)
+                   + np.sum(self.sol['phi_n'][1:-1]**2)
+                   + np.sum(self.sol['phi_p'][1:-1]**2)
+                   + self.S**2
+                   )
+                 )
+
+            # update current solution
+            m = len(self.xn) - 2
+            self.sol['psi'][1:-1] += dx[:m] * omega
+            self.sol['phi_n'][1:-1] += dx[m:2*m] * omega
+            self.sol['phi_p'][1:-1] += dx[2*m:3*m] * omega
+            if dx[-1] > 0:
+               self.S += dx[-1] * omega_S[0]
+            else:
+                self.S += dx[-1] * omega_S[1]
+            self._update_temperature()
+            self._update_densities()
+            self._update_current_densities()
+            self._update_recombination_rates()
+            self._update_gain_fca_Rst()
+            
+            self.fluct.append(fluct)
+            self.fluct_T.append(np.sqrt(np.sum((T_prev - self.vn['T'])**2)))
+            self.iterations += 1
 
         return fluct
 
@@ -745,6 +830,12 @@ class LaserDiodeModel1d(LaserDiode):
         if self.is_dimensionless:
             P *= units.P
         return P
+    
+    def get_voltage(self):
+        V = self.voltage
+        if self.is_dimensionless:
+            V *= units.V        
+        return V
 
     def get_Sb_Sf(self):
         "Get densities of backward- and forward-propagating photons."
