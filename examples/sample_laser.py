@@ -40,7 +40,7 @@ ar_params = dict(g0=1500, N_tr=1.85e18)  # active region params
 # _p - power dependence, _Ea - activation energy,
 # Rt - temperature resistance
 dT_AlGaAs = dict(Eg_A=-5.41e-4, Eg_B=204, mu_n_P=-1, mu_p_P=-2, B_P=-1, 
-                 C_Ea=0.1, fca_e_P=1, fca_h_P=2, d_g0=-2, d_Ntr=2e15, Rt=2)
+                 C_Ea=0.1, fca_e_P=1, fca_h_P=2, d_g0=-2, d_Ntr=2e15, Rt=2.0)
 
 #%% Setup layers
 AlGaAs = material_AlGaAs(DEFAULT_TEMPERATURE, AlAs, GaAs, ar_params, dT_AlGaAs)

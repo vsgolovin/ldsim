@@ -12,7 +12,7 @@ if not path.isdir(EXPORT_FOLDER):
 # initialize model
 ld = LaserDiodeModel1d(layers_design, AlGaAs, L=0.3, w=0.01, R1=0.95, R2=0.05, 
                        lam=0.87e-4, ng=3.9, alpha_i=0.5, beta_sp=1e-5, 
-                       T_dependent=True)
+                       T_HS=300.0, T_dependent=True)
 ld.generate_nonuniform_mesh(y_ext=[1., 1.])
 mode = ld.solve_waveguide()
 
@@ -23,12 +23,15 @@ ld.solve_equilibrium()
 
 # applied voltage values
 #voltages = np.arange(0.0, 1.601, 0.05)
-voltages = np.hstack([np.arange(0, 1.0, 0.025),
-                      np.arange(1.0, 1.601, 0.01)])
+voltages = np.hstack([np.arange(0, 0.5, 0.05),
+                      np.arange(0.5, 1.2, 0.025),
+                      np.arange(1.2, 1.5, 0.01),
+                      np.arange(1.5, 1.601, 0.005)])
 
 # simulation results
 current_densities = np.zeros_like(voltages)
 output_power = np.zeros_like(voltages)
+temperature = np.zeros_like(voltages)
 # currents, associated with different spontaneous recombination mechanisms
 I_srh = np.zeros_like(voltages)  # Shockley-Read-Hall
 I_rad = np.zeros_like(voltages)  # radiative
@@ -53,6 +56,7 @@ for i, v in enumerate(voltages):
     # save results
     current_densities[i] = ld.get_current_density() * (-1)
     output_power[i] = ld.get_output_power()
+    temperature[i] = ld.get_temperature()
     I_srh[i] = ld.get_recombination_current('srh')
     I_rad[i] = ld.get_recombination_current('rad')
     I_aug[i] = ld.get_recombination_current('aug')

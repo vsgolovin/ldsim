@@ -137,16 +137,27 @@ class material_AlGaAs:
         """Band gap energy"""
         T = self._set_T(T)
         T_dim = T*units['T'] if self.is_dimensionless else T
-
-        Eg = _Eg_AlGaAs(x)
-        Eg_T = Eg + (self.dT_coeffs['Eg_A'] * T_dim**2) / \
+        
+        Eg_0 = _Eg_AlGaAs(0)
+        Eg_T0 = _Eg_AlGaAs(0) + (self.dT_coeffs['Eg_A'] * T_dim**2) / \
+            (self.dT_coeffs['Eg_B'] + T_dim)
+        Eg_T = _Eg_AlGaAs(x) + (self.dT_coeffs['Eg_A'] * T_dim**2) / \
             (self.dT_coeffs['Eg_B'] + T_dim)
 
         # !!! fix calculations of Ec and Ev
-        Ec = self.BC_params['Eg'] + (Eg_T - self.BC_params['Eg'])*2/3
-        Ev = 0 - (Eg_T - self.BC_params['Eg'])*1/3
+        Ec = Eg_0 - (Eg_0 - Eg_T0)*3/5 + (Eg_T - Eg_T0)*3/5
+        Ev = 0 + (Eg_0 - Eg_T0)*2/5 - (Eg_T - Eg_T0)*2/5
         return self._dimension(Eg_T, 'Eg'), self._dimension(Ec, 'Ec'), \
             self._dimension(Ev, 'Ev') 
+    
+    def Eg(self, x=0, T=None):
+        return self.Eg_AlGaAs(x=x, T=T)[0]
+    
+    def Ec(self, x=0, T=None):
+        return self.Eg_AlGaAs(x=x, T=T)[1]
+    
+    def Ev(self, x=0, T=None):
+        return self.Eg_AlGaAs(x=x, T=T)[2]
 
     def mu_n(self, x=0, T=None):
         """Electron mobility"""
@@ -277,7 +288,7 @@ class material_AlGaAs:
         g0 = self.ar_params['g0'] + self.dT_coeffs['d_g0']*dT
         return self._dimension(g0, 'g0')
 
-    def Ntr(self, T=None):
+    def N_tr(self, T=None):
         """Material gain constant"""
         T = self._set_T(T)
         dT = (T - self.T_HS)*units['T'] if self.is_dimensionless else \
