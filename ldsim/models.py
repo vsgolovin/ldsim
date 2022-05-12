@@ -220,7 +220,7 @@ class LaserDiodeModel1d(LaserDiode):
         Calculate temperature distribution in active region using simple 
         uniform disribution.
         """
-        P = self.get_output_power()
+        P = self.get_output_power().sum()
         I = self.get_current() * (-1)
         V = self.get_voltage()
 
@@ -265,7 +265,7 @@ class LaserDiodeModel1d(LaserDiode):
                 getattr(self.material, param)(T=self.vn['T'][self.ar_ix])
                     
         # equilibrium carrier concentrations
-        if self.iterations % 2 == 0:
+        if self.iterations % 10 == 0:
             self.solve_lcn()
             sol = newton.EquilibriumSolver1d(self.vn, self.xn, self.xb, self.q,
                                              self.eps_0)
@@ -1339,6 +1339,8 @@ class LaserDiodeModel2d(LaserDiodeModel1d):
         # `apply_voltage` does not calculate gain
         if len(self.fluct) == 0:
             self._update_gain_fca_Rst()
+            
+        T_prev = self.vn['T']
 
         # solve the system
         J, residuals = self._lasing_system()
@@ -1377,13 +1379,18 @@ class LaserDiodeModel2d(LaserDiodeModel1d):
         self.Sf[0] = self.Sb[0] * self.R1
         self.S = (self.Sf[:-1] + self.Sf[1:] + self.Sb[:-1] + self.Sb[1:]) / 2
 
+        self._update_temperature()
         self._update_densities()
         self._update_current_densities()
         self._update_recombination_rates()
         self._update_gain_fca_Rst()
+        fluct_T = np.sqrt(np.sum((T_prev - self.vn['T'])**2))
+        self.fluct_T.append(fluct_T)
         self.iterations += 1
+        
+        assert fluct < 10., 'Convergency breaks! For check: -ld.get_I()'
 
-        return fluct
+        return max(fluct, fluct_T)
 
     def _j_to_current(self, j: np.ndarray) -> float:
         dz = self.zb[1:, 0] - self.zb[:-1, 0]

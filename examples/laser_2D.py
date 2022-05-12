@@ -2,7 +2,7 @@ from os import path, mkdir
 import numpy as np
 import matplotlib.pyplot as plt
 from ldsim.models import LaserDiodeModel2d
-from sample_laser import layers
+from sample_laser import layers_design, AlGaAs
 
 MZ = 10  # number of vertical cross-sections / slices
 EXPORT_FOLDER = 'results'
@@ -10,9 +10,10 @@ if not path.isdir(EXPORT_FOLDER):
     mkdir(EXPORT_FOLDER)
 
 # initialize model
-ld = LaserDiodeModel2d(layers, num_slices=MZ, L=0.3, w=0.01, R1=0.95, R2=0.05,
-                       lam=0.87e-4, ng=3.9, alpha_i=0.5, beta_sp=1e-5)
-ld.generate_nonuniform_mesh(y_ext=[0., 0.])
+ld = LaserDiodeModel2d(layers_design, AlGaAs, L=0.3, w=0.01, R1=0.95, R2=0.05, 
+                       lam=0.87e-4, ng=3.9, alpha_i=0.5, beta_sp=1e-5, 
+                       T_HS=300.0, T_dependent=True)
+ld.generate_nonuniform_mesh(y_ext=[1., 1.])
 mode = ld.solve_waveguide()
 
 # find electrostatic potential and carrier densities corresponding
@@ -22,6 +23,11 @@ ld.solve_equilibrium()
 
 # applied voltage values
 voltages = np.arange(0.0, 1.601, 0.05)
+voltages = np.hstack([np.arange(0, 0.5, 0.05),
+                      np.arange(0.5, 1.2, 0.025),
+                      np.arange(1.2, 1.5, 0.01),
+                      np.arange(1.5, 1.57, 0.005),
+                      np.arange(1.57, 1.601, 0.0025)])
 
 # simulation results
 current_densities = np.zeros_like(voltages)
@@ -37,7 +43,7 @@ alpha_i = np.zeros_like(voltages)
 # solve the drift-diffusion problem for every voltage
 print('Voltage Iterations Power')
 for i, v in enumerate(voltages):
-    print(f' {v:.2f}    ', end='')
+    print(f' {v:.3f}    ', end='')
     ld.apply_voltage(v)
     # store previous solution fluctuation
     fluct = 1  # any value so that the first iteration is performed
