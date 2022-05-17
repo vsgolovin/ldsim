@@ -253,7 +253,7 @@ class LaserDiodeModel1d(LaserDiode):
 
         # update parameters
         keys = list(self.material.AC_params.keys()) + ['Nc', 'Nv']  
-        #  !!! need to add here 'Ec', 'Ev', 
+        #  TODO: add here 'Ec', 'Ev', 
         
         for d in (self.vn, self.vb):
             for param in d:

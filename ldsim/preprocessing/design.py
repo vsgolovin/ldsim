@@ -144,7 +144,7 @@ class Layer:
 
 class LaserDiode:
     def __init__(self, layers_design, material, L, w, R1, R2, lam, ng, alpha_i, 
-                 beta_sp, T_HS=DEFAULT_TEMPERATURE, T_dependent=True):
+                 beta_sp, T_HS=DEFAULT_TEMPERATURE, T_dependent=False):
         """
         Class for storing laser diode parameters.
 
@@ -172,13 +172,16 @@ class LaserDiode:
         beta_sp : number
             Spontaneous emission factor, i.e. the fraction of spontaneous
             emission that is coupled with the lasing mode.
-
+        T_HS : float
+            Heatsink temperature
+        T_dependent : bool
+            Add temperature update of all laser parameters (for CW regime).        
         """
+        
         # copy inputs
         self.material = material
-        layers = material.setup_layers(layers_design)
-        assert all(isinstance(layer, Layer) for layer in layers)
-        self.layers = list(layers)
+        self.layers = material.setup_layers(layers_design)
+        assert all(isinstance(layer, Layer) for layer in self.layers)
         self.L = L
         self.w = w
         assert 0 < R1 <= 1 and 0 < R2 <= 1
@@ -189,6 +192,8 @@ class LaserDiode:
         self.vg = const.c / self.ng
         self.alpha_i = alpha_i
         self.beta_sp = beta_sp
+        self.material.T_HS = T_HS
+        self.T_dependent = T_dependent
 
         # additinal attributes
         self.alpha_m = 1 / (2 * L) * np.log(1 / (R1 * R2))
@@ -199,10 +204,6 @@ class LaserDiode:
         self.kb = const.kb
         self.q = const.q
         self.eps_0 = const.eps_0
-        
-        # temperature parameters
-        self.material.T_HS = T_HS
-        self.T_dependent = T_dependent
 
     def make_dimensionless(self):
         "Make every parameter dimensionless."
@@ -220,6 +221,7 @@ class LaserDiode:
         self.is_dimensionless = self.material.is_dimensionless = True
         # temperature parameters
         self.material.T_HS /= units.T
+        # for Rt taking in account only T, power dimension sets in ld.get_power
         self.material.dT_coeffs['Rt'] /= units.dct['T']
         self.material.dT_coeffs['d_g0'] /= units.dct['g0']
         self.material.dT_coeffs['d_Ntr'] /= units.dct['N_tr']
@@ -240,6 +242,7 @@ class LaserDiode:
         self.is_dimensionless = self.material.is_dimensionless = False
         # temperature parameters
         self.material.T_HS *= units.T
+        # for Rt taking in account only T, power dimension sets in ld.get_power
         self.material.dT_coeffs['Rt'] *= units.dct['T']
         self.material.dT_coeffs['d_g0'] *= units.dct['g0']
         self.material.dT_coeffs['d_Ntr'] *= units.dct['N_tr']
