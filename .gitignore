@@ -177,3 +177,4 @@ results/
 *.synctex.gz
 *.synctex.gz(busy)
 *.pdfsync
+examples/NL1736.py

@@ -79,7 +79,7 @@ class material_AlGaAs:
         # check if all parameters specified
         assert all(p in material_params for m in 
                    [self.AC_params.keys(), self.BC_params.keys()] for p in m)
-        assert all(ar_p in params_active for ar_p in self.ar_params.keys())
+        #assert all(ar_p in params_active for ar_p in self.ar_params.keys())
         assert all(t_p in temperature_params for t_p in self.dT_coeffs.keys())
 
     def _set_T(self, T):
@@ -106,15 +106,30 @@ class material_AlGaAs:
         grad_layers = []  # store gradient layers
         for i, l in enumerate(layers):
             if 'grad' not in l:  # skip gardient layers  
-                is_active = True if l == 'active' else False
-                structure[l] = Layer(l, thickness[i], active=is_active)
-                structure[l].update(self.set_initial_params(
-                    x=layers_design['x'][i]))
+
+                if l != 'active':  # setup all non-active layers
+                    structure[l] = Layer(l, thickness[i], active=False)
+                    structure[l].update(self.set_initial_params(
+                        x=layers_design['x'][i]))
+                    
+                else:   # setup active layers separately
+                    structure[l] = Layer(l, thickness[i], active=True)
+                    
+                    # check if active region has its own parameters
+                    if not all(p in self.ar_params.keys() \
+                               for p in material_params):
+                        assert isinstance(layers_design['x'][i], (int, float))
+                        structure[l].update(self.set_initial_params(
+                            x=layers_design['x'][i]))
+
+                    # setup specific active region params  
+                    structure[l].update(self.set_initial_params(
+                        params_dict=self.ar_params))
+                
                 structure[l].update({'Nd': layers_design['Nd'][i], 
                                      'Na': layers_design['Na'][i]})
-                if l == 'active':
-                    structure[l].update(self.ar_params)
-            else:
+                
+            else:  # setup gradient layers
                 layers[i] = 'grad' + str(len(grad_layers) + 1)                
                 grad_layers.append(layers[i])
 
@@ -139,8 +154,8 @@ class material_AlGaAs:
             (self.dT_coeffs['Eg_B'] + T_dim)
 
         # TODO fix calculations of Ec and Ev
-        Ec = Eg_0 + (Eg_T - Eg_T0)*3/5  #  - (Eg_0 - Eg_T0)*3/5
-        Ev = 0 - (Eg_T - Eg_T0)*2/5  # + (Eg_0 - Eg_T0)*2/5 
+        Ec = Eg_0 + (Eg_T - Eg_T0)*3/5   - (Eg_0 - Eg_T0)*3/5
+        Ev = 0 - (Eg_T - Eg_T0)*2/5  + (Eg_0 - Eg_T0)*2/5 
         
         return [self._set_dimension(i, 'Eg') for i in [Eg_T, Ec, Ev]]
 
@@ -173,11 +188,16 @@ class material_AlGaAs:
 
         return self._set_dimension(mu_p_T, 'mu_p')
 
-    def Nc(self, x=0, T=None):
+    def Nc(self, x=0, T=None, m_e=None):
         """Density of states in conductive band"""
         T = self._set_T(T)
         T_dim = T*units['T'] if self.is_dimensionless else T
         self.Vt = const.kb*T_dim
+        
+        if m_e is not None:
+            Nc = 2*((2*np.pi*m_e*self.Vt*const.m0*const.q)/\
+                         (const.h**2))**(3/2)*1e-6
+            return self._set_dimension(Nc, 'Nc')
 
         # 1e-6 for converting to cm
         Nc_AlAs = 2*((2*np.pi*self.AC_params['m_e']*self.Vt*const.m0*const.q)/\
@@ -190,11 +210,16 @@ class material_AlGaAs:
 
         return self._set_dimension(Nc_AlGaAs, 'Nc')
 
-    def Nv(self, x=0, T=None):
+    def Nv(self, x=0, T=None, m_h=None):
         """Density of states in valence band"""
         T = self._set_T(T)
         T_dim = T*units['T'] if self.is_dimensionless else T
         self.Vt = const.kb*T_dim
+        
+        if m_h is not None:
+            Nv = 2*((2*np.pi*m_h*self.Vt*const.m0*const.q)/\
+                         (const.h**2))**(3/2)*1e-6
+            return self._set_dimension(Nv, 'Nv')
 
         # 1e-6 for converting to cm
         Nv_AlAs = 2*((2*np.pi*self.AC_params['m_h']*self.Vt*const.m0*const.q)/\
@@ -292,10 +317,22 @@ class material_AlGaAs:
         Ntr = self.ar_params['N_tr'] + self.dT_coeffs['d_Ntr']*dT
         return self._set_dimension(Ntr, 'N_tr')
 
-    def set_initial_params(self, x=0, T=None):
+    def set_initial_params(self, x=0, T=None, params_dict=None):
         """Function for setuping initial structure parameters"""
         T = self._set_T(T)
+        
+        # for active region params
+        if params_dict is not None: 
+            params = params_dict.copy()
+            if all(p in params_dict.keys() for p in material_params):
+                Nc = self.Nc(m_e=params_dict['m_e']) 
+                Nv = self.Nv(m_h=params_dict['m_h'])
+                params.pop('m_e')
+                params.pop('m_h')
+                params.update({'Nc': Nc, 'Nv': Nv})
+            return params
 
+        # for layers AlGaAs params
         _, Ec, Ev = self.Eg_AlGaAs(x=x)
         n_refr, eps = self.n_refr(x=x)
 
@@ -311,3 +348,4 @@ class material_AlGaAs:
         """Temperature update of all params"""
 
         assert self.x_profile is not None
+        pass

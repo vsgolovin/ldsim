@@ -12,7 +12,7 @@ if not path.isdir(EXPORT_FOLDER):
 # initialize model
 ld = LaserDiodeModel1d(layers_design, AlGaAs, L=0.3, w=0.01, R1=0.95, R2=0.05, 
                        lam=0.87e-4, ng=3.9, alpha_i=0.5, beta_sp=1e-5, 
-                       T_HS=300.0, T_dependent=True)
+                       T_HS=300.0, T_dependent=False)
 ld.generate_nonuniform_mesh(y_ext=[1., 1.])
 mode = ld.solve_waveguide()
 
@@ -22,11 +22,11 @@ ld.make_dimensionless()
 ld.solve_equilibrium()
 
 # applied voltage values
-#voltages = np.arange(0.0, 1.601, 0.05)
-voltages = np.hstack([np.arange(0, 0.5, 0.05),
-                      np.arange(0.5, 1.2, 0.025),
-                      np.arange(1.2, 1.5, 0.01),
-                      np.arange(1.5, 1.601, 0.005)])
+voltages = np.arange(0.0, 1.601, 0.05)
+#voltages = np.hstack([np.arange(0, 0.5, 0.05),
+#                      np.arange(0.5, 1.2, 0.025),
+#                      np.arange(1.2, 1.5, 0.01),
+#                      np.arange(1.5, 1.601, 0.005)])
 
 # simulation results
 current_densities = np.zeros_like(voltages)
