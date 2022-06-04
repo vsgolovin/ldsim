@@ -154,8 +154,8 @@ class material_AlGaAs:
             (self.dT_coeffs['Eg_B'] + T_dim)
 
         # TODO fix calculations of Ec and Ev
-        Ec = Eg_0 + (Eg_T - Eg_T0)*3/5   - (Eg_0 - Eg_T0)*3/5
-        Ev = 0 - (Eg_T - Eg_T0)*2/5  + (Eg_0 - Eg_T0)*2/5 
+        Ec = Eg_0 + (Eg_T - Eg_T0)*3/5 - (Eg_0 - Eg_T0)*3/5
+        Ev = 0 - (Eg_T - Eg_T0)*2/5 + (Eg_0 - Eg_T0)*2/5 
         
         return [self._set_dimension(i, 'Eg') for i in [Eg_T, Ec, Ev]]
 
