@@ -10,7 +10,7 @@ from .waveguide import solve_wg
 
 params = ('Ev', 'Ec', 'Nd', 'Na', 'Nc', 'Nv', 'mu_n', 'mu_p', 'tau_n',
           'tau_p', 'B', 'Cn', 'Cp', 'eps', 'n_refr', 'Eg', 'C_dop',
-          'fca_e', 'fca_h','x', 'T')
+          'fca_e', 'fca_h', 'x', 'composition', 'T')
 params_active = ('g0', 'N_tr')
 DEFAULT_TEMPERATURE = 300.0
 
@@ -218,7 +218,8 @@ class LaserDiode:
         self.kb /= units.E / units.T
         self.q /= units.q
         self.eps_0 /= units.q / (units.x * units.V)
-        self.is_dimensionless = self.material.is_dimensionless = True
+        self.is_dimensionless = True
+        self.material.is_dimensionless = True
         # temperature parameters
         self.material.T_HS /= units.T
         # for Rt taking in account only T, power dimension sets in ld.get_power
@@ -239,7 +240,8 @@ class LaserDiode:
         self.kb = const.kb
         self.q = const.q
         self.eps_0 = const.eps_0
-        self.is_dimensionless = self.material.is_dimensionless = False
+        self.is_dimensionless = False
+        self.material.is_dimensionless = False
         # temperature parameters
         self.material.T_HS *= units.T
         # for Rt taking in account only T, power dimension sets in ld.get_power

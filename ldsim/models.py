@@ -15,8 +15,9 @@ from ldsim.transport import flux
 input_params_nodes = [
     'Ev', 'Ec', 'Eg', 'Nd', 'Na', 'C_dop', 'Nc', 'Nv', 'mu_n', 'mu_p',
     'tau_n', 'tau_p', 'B', 'Cn', 'Cp', 'eps', 'n_refr', 'g0', 'N_tr',
-    'fca_e', 'fca_h', 'x', 'T']
-input_params_boundaries = ['Ev', 'Ec', 'Nc', 'Nv', 'mu_n', 'mu_p', 'x', 'T']
+    'fca_e', 'fca_h', 'x', 'composition', 'T']
+input_params_boundaries = ['Ev', 'Ec', 'Nc', 'Nv', 'mu_n', 'mu_p', 'x', 
+                           'composition', 'T']
 params_active = ['g0', 'N_tr']
 calculated_params_nodes = [
     'Vt', 'psi_lcn', 'n0', 'p0', 'psi_bi', 'wg_mode',
@@ -106,7 +107,7 @@ class LaserDiodeModel1d(LaserDiode):
                 continue
             self.vn[param] = self.calculate(
                 param, self.xn, z=0, inds=inds, dx=dx)
-        self.material.x_profile = self.vn['x']
+        
         # active region
         inds, dx = inds[self.ar_ix], dx[self.ar_ix]
         for param in params_active:
@@ -118,6 +119,11 @@ class LaserDiodeModel1d(LaserDiode):
         for param in input_params_boundaries:
             self.vb[param] = self.calculate(
                 param, self.xb, z=0, inds=inds, dx=dx)
+        
+        # material params    
+        self.material.x_profile = self.vn['x']
+        self.vb['composition'] = self.material.setup_composition(self.vb['composition'])
+        self.vn['composition'] = self.material.setup_composition(self.vn['composition'])
 
         # waveguide mode
         if self.gamma is not None:  # calculated waveguide mode profile
@@ -256,7 +262,8 @@ class LaserDiodeModel1d(LaserDiode):
         #  TODO: add here 'Ec', 'Ev', 
         
         for d in (self.vn, self.vb):
-            for param in d:
+            self.material.composition = d['composition']
+            for param in d:                
                 if d[param] is not None and  param in keys:
                     d[param] = getattr(self.material, param)(x=d['x'], T=d['T'])                    
         

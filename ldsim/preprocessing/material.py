@@ -68,25 +68,62 @@ class material_AlGaAs:
         """
         self.T_HS = T_HS  # heatsink temperature
         self.Vt0 = const.kb*T_HS
+        
         self.AC_params = AC_params  # dictionaries with all structure params
         self.BC_params = BC_params
         self.ar_params = ar_params
         self.dT_coeffs = dT_coeffs
         
         self.x_profile = None  # structure composition profile
+        self.composition = None
         self.is_dimensionless = False
 
         # check if all parameters specified
         assert all(p in material_params for m in 
-                   [self.AC_params.keys(), self.BC_params.keys()] for p in m)
-        #assert all(ar_p in params_active for ar_p in self.ar_params.keys())
-        assert all(t_p in temperature_params for t_p in self.dT_coeffs.keys())
+                   [self.AC_params.keys(), self.BC_params.keys()] for p in m)#!
+        assert all(ar_p in self.ar_params.keys() for ar_p in params_active)
+        if all(p in self.ar_params.keys() for p in material_params):
+            Nc = self.Nc(m_e=self.ar_params['m_e']) 
+            Nv = self.Nv(m_h=self.ar_params['m_h'])
+            self.ar_params.update({'Nc': Nc, 'Nv': Nv})
+        assert all(t_p in self.dT_coeffs.keys() for t_p in temperature_params)
 
     def _set_T(self, T):
-        return self.T_HS if T is None else T 
+        return self.T_HS if T is None else T
 
     def _set_dimension(self, value, unit):
         return value/units[unit] if self.is_dimensionless else value
+    
+    def _set_param(self, value_func, p, x):
+        """
+        Setup and update params based on composition
+        value_func - function for calculating param for AlGaAs alloy
+        p - param name, string
+        x - composition profile, array or number
+        """
+        param = None        
+        value = self.ar_params[p] if p in self.ar_params else None
+        
+        # for setuping layers
+        if isinstance(x, (int, float)):
+            param = value_func(x)
+            
+        # for updating params at mesh nodes
+        # now only for GaInAs in AlGaAs
+        elif isinstance(x, (list, np.ndarray)):            
+            assert len(x) == len(self.composition)
+            param = np.zeros_like(x, dtype=float)
+            
+            for i in np.unique(self.composition):
+                idxs = np.where(self.composition==i)[0]
+                if i == 'AlGaAs':
+                    param[idxs] = value_func(x[idxs])
+                elif i == 'GaInAs':
+                    param[idxs] = np.full(len(idxs), value)
+                else:
+                    assert False, 'Unknown material!'
+        
+        return param
 
     def setup_layers(self, layers_design):
         """
@@ -100,11 +137,12 @@ class material_AlGaAs:
         """
         layers = layers_design['names']
         thickness = layers_design['thickness']
+        self.composition_keys = layers_design['composition_keys']
 
         structure = dict()
 
         grad_layers = []  # store gradient layers
-        for i, l in enumerate(layers):
+        for i, l in enumerate(layers):            
             if 'grad' not in l:  # skip gardient layers  
 
                 if l != 'active':  # setup all non-active layers
@@ -124,8 +162,10 @@ class material_AlGaAs:
 
                     # setup specific active region params  
                     structure[l].update(self.set_initial_params(
-                        params_dict=self.ar_params))
-                
+                        params_dict={x: self.ar_params[x] \
+                                     for x in self.ar_params \
+                                     if x not in ['m_e', 'm_h']}))
+        
                 structure[l].update({'Nd': layers_design['Nd'][i], 
                                      'Na': layers_design['Na'][i]})
                 
@@ -133,13 +173,26 @@ class material_AlGaAs:
                 layers[i] = 'grad' + str(len(grad_layers) + 1)                
                 grad_layers.append(layers[i])
 
-        for i, l in enumerate(layers):
+        for i, l in enumerate(layers):       
             if l in grad_layers:  # add gradient layers
                 structure[l] = structure[layers[i-1]].make_gradient_layer(
                     structure[layers[i+1]], 'gradient', thickness[i])
+        
+        for i, l in enumerate(layers):        
+            structure[l].update({'composition': layers_design['composition'][i]})
 
         self.layers_list = [structure[l] for l in layers]
         return self.layers_list
+    
+    def setup_composition(self, c):
+        
+        composition = np.zeros_like(c, dtype=object)
+        
+        for key in self.composition_keys.keys():
+            idxs = np.where(c==self.composition_keys[key])[0]
+            composition[idxs] = np.full(len(idxs), key)
+        
+        return composition
 
 
     def Eg_AlGaAs(self, x=0, T=None):
@@ -147,17 +200,19 @@ class material_AlGaAs:
         T = self._set_T(T)
         T_dim = T*units['T'] if self.is_dimensionless else T
         
+        # band gap energy without temperature
         Eg_0 = _Eg_AlGaAs(0)
-        Eg_T0 = _Eg_AlGaAs(0) + (self.dT_coeffs['Eg_A'] * T_dim**2) / \
-            (self.dT_coeffs['Eg_B'] + T_dim)
-        Eg_T = _Eg_AlGaAs(x) + (self.dT_coeffs['Eg_A'] * T_dim**2) / \
+        Eg_x = self._set_param(_Eg_AlGaAs, 'Eg', x)
+        # with temperature
+        Eg_Tx = Eg_x + (self.dT_coeffs['Eg_A'] * T_dim**2) / \
             (self.dT_coeffs['Eg_B'] + T_dim)
 
         # TODO fix calculations of Ec and Ev
-        Ec = Eg_0 + (Eg_T - Eg_T0)*3/5 - (Eg_0 - Eg_T0)*3/5
-        Ev = 0 - (Eg_T - Eg_T0)*2/5 + (Eg_0 - Eg_T0)*2/5 
+        # initial value (for GaAs), composition and temperature contribution        
+        Ec = Eg_0 - (Eg_0 - Eg_Tx)*3/5
+        Ev = 0 + (Eg_0 - Eg_Tx)*2/5
         
-        return [self._set_dimension(i, 'Eg') for i in [Eg_T, Ec, Ev]]
+        return [self._set_dimension(i, 'Eg') for i in [Eg_Tx, Ec, Ev]]
 
     def Eg(self, x=0, T=None):
         return self.Eg_AlGaAs(x=x, T=T)[0]
@@ -167,13 +222,14 @@ class material_AlGaAs:
     
     def Ev(self, x=0, T=None):
         return self.Eg_AlGaAs(x=x, T=T)[2]
+    
 
     def mu_n(self, x=0, T=None):
         """Electron mobility"""
         T = self._set_T(T)
 
         # weakly doped AlGaAs
-        mu_n = _mu_n_AlGaAs(x)
+        mu_n = self._set_param(_mu_n_AlGaAs, 'mu_n', x)
         mu_n_T = mu_n * (T/self.T_HS)**self.dT_coeffs['mu_n_P']
 
         return self._set_dimension(mu_n_T, 'mu_n')
@@ -183,70 +239,82 @@ class material_AlGaAs:
         T = self._set_T(T)
 
         # weakly doped AlGaAs
-        mu_p = _mu_p_AlGaAs(x)
+        mu_p = self._set_param(_mu_p_AlGaAs, 'mu_p', x)
         mu_p_T = mu_p * (T/self.T_HS)**self.dT_coeffs['mu_p_P']
 
         return self._set_dimension(mu_p_T, 'mu_p')
+    
 
     def Nc(self, x=0, T=None, m_e=None):
         """Density of states in conductive band"""
         T = self._set_T(T)
         T_dim = T*units['T'] if self.is_dimensionless else T
         self.Vt = const.kb*T_dim
+        if isinstance(self.Vt, np.ndarray):
+            # TODO: fix for nonuniform temperature distribution
+            self.Vt = self.Vt.mean()
         
-        if m_e is not None:
+        if m_e is not None:   # single value for setuping layer
             Nc = 2*((2*np.pi*m_e*self.Vt*const.m0*const.q)/\
                          (const.h**2))**(3/2)*1e-6
             return self._set_dimension(Nc, 'Nc')
-
-        # 1e-6 for converting to cm
-        Nc_AlAs = 2*((2*np.pi*self.AC_params['m_e']*self.Vt*const.m0*const.q)/\
-                     (const.h**2))**(3/2)*1e-6
-        Nc_GaAs = 2*((2*np.pi*self.BC_params['m_e']*self.Vt*const.m0*const.q)/\
-                     (const.h**2))**(3/2)*1e-6
-
-        # !!! linear approximation - without bowing parameter
-        Nc_AlGaAs = Nc_AlAs*x + Nc_GaAs*(1-x)
-
-        return self._set_dimension(Nc_AlGaAs, 'Nc')
+        
+        def _Nc_AlGaAs(X):
+            # 1e-6 for converting to cm
+            Nc_AlAs = 2*((2*np.pi*self.AC_params['m_e']*self.Vt*const.m0\
+                          *const.q) / (const.h**2))**(3/2)*1e-6
+            Nc_GaAs = 2*((2*np.pi*self.BC_params['m_e']*self.Vt*const.m0\
+                          *const.q) / (const.h**2))**(3/2)*1e-6
+            # !!! linear approximation - without bowing parameter
+            return Nc_AlAs*X + Nc_GaAs*(1 - X)
+        
+        Nc = self._set_param(_Nc_AlGaAs, 'Nc', x)
+        return self._set_dimension(Nc, 'Nc')
 
     def Nv(self, x=0, T=None, m_h=None):
         """Density of states in valence band"""
         T = self._set_T(T)
         T_dim = T*units['T'] if self.is_dimensionless else T
         self.Vt = const.kb*T_dim
+        if isinstance(self.Vt, np.ndarray):
+            self.Vt = self.Vt.mean()
         
-        if m_h is not None:
+        if m_h is not None:   # single value for setuping layer
             Nv = 2*((2*np.pi*m_h*self.Vt*const.m0*const.q)/\
                          (const.h**2))**(3/2)*1e-6
             return self._set_dimension(Nv, 'Nv')
 
-        # 1e-6 for converting to cm
-        Nv_AlAs = 2*((2*np.pi*self.AC_params['m_h']*self.Vt*const.m0*const.q)/\
-                     (const.h**2))**(3/2)*1e-6
-        Nv_GaAs = 2*((2*np.pi*self.BC_params['m_h']*self.Vt*const.m0*const.q)/\
-                     (const.h**2))**(3/2)*1e-6
+        def _Nv_AlGaAs(X):
+            # 1e-6 for converting to cm
+            Nv_AlAs = 2*((2*np.pi*self.AC_params['m_h']*self.Vt*const.m0\
+                          *const.q) / (const.h**2))**(3/2)*1e-6
+            Nv_GaAs = 2*((2*np.pi*self.BC_params['m_h']*self.Vt*const.m0\
+                          *const.q) / (const.h**2))**(3/2)*1e-6
 
-        # without bowing parameter
-        Nv_AlGaAs = Nv_AlAs*x + Nv_GaAs*(1-x)
-
-        return self._set_dimension(Nv_AlGaAs, 'Nv')
+            # without bowing parameter
+            return Nv_AlAs*X + Nv_GaAs*(1 - X)
+        
+        Nv = self._set_param(_Nv_AlGaAs, 'Nv', x)
+        return self._set_dimension(Nv, 'Nv')
+    
 
     def tau_n(self, x=0, T=None):
         """Nonradiative recombination coefficient"""
-        tau_n = self.AC_params['tau_n']
+        T = self._set_T(T)
+        tau_n = self.AC_params['tau_n'] * np.ones_like(T)
         return self._set_dimension(tau_n, 'tau_n')
 
     def tau_p(self, x=0, T=None):
         """Nonradiative recombination coefficient"""
-        tau_p = self.AC_params['tau_p']
+        T = self._set_T(T)
+        tau_p = self.AC_params['tau_p'] * np.ones_like(T)
         return self._set_dimension(tau_p, 'tau_n')
 
     def B(self, x=0, T=None):
         """Radiative recombination coefficient"""
         T = self._set_T(T)
 
-        B = self.AC_params['B']*x + self.BC_params['B']*(1-x)
+        B = self.AC_params['B']#*x + self.BC_params['B']*(1-x)
         B *= (T/self.T_HS)**self.dT_coeffs['B_P']
         return self._set_dimension(B, 'B')
 
@@ -257,7 +325,7 @@ class material_AlGaAs:
         self.Vt = const.kb*T_dim
         dV_inv = 1/(self.Vt * self.T_HS/T) - 1/self.Vt
 
-        Cn = self.AC_params['Cn']*x + self.BC_params['Cn']*(1-x)
+        Cn = self.AC_params['Cn']#*x + self.BC_params['Cn']*(1-x)
         Cn *= np.exp(self.dT_coeffs['C_Ea']*dV_inv)
         return self._set_dimension(Cn, 'Cn')
 
@@ -268,26 +336,28 @@ class material_AlGaAs:
         self.Vt = const.kb*T_dim
         dV_inv = 1/(self.Vt * self.T_HS/T) - 1/self.Vt
 
-        Cp = self.AC_params['Cp']*x + self.BC_params['Cp']*(1-x)
+        Cp = self.AC_params['Cp']#*x + self.BC_params['Cp']*(1-x)
         Cp *= np.exp(self.dT_coeffs['C_Ea']*dV_inv)
         return self._set_dimension(Cp, 'Cp')
+    
 
     def n_refr(self, x=0, T=None):
         """Refractive index and dielectric permittivity"""
         T = self._set_T(T)
 
         # !!! dont take in account temperature and other effects
-        n_refr = _n_refr_AlGaAs(x)
+        n_refr = self._set_param(_n_refr_AlGaAs, 'n_refr', x)
         # only real part of dielectric permittivity
         eps = n_refr**2
         return self._set_dimension(n_refr, 'n_refr'), \
             self._set_dimension(eps, 'eps')
+            
 
     def fca_e(self, x=0, T=None):
         """Elecrons free carrier adsorbtion coefficient"""
         T = self._set_T(T)
 
-        fca_e = self.AC_params['fca_e']*x + self.BC_params['fca_e']*(1-x)
+        fca_e = self.AC_params['fca_e']#*x + self.BC_params['fca_e']*(1-x)
         fca_e *= (T/self.T_HS)**self.dT_coeffs['fca_e_P']
         return self._set_dimension(fca_e, 'fca_e')
 
@@ -295,9 +365,10 @@ class material_AlGaAs:
         """Elecrons free carrier adsorbtion coefficient"""
         T = self._set_T(T)
 
-        fca_h = self.AC_params['fca_h']*x + self.BC_params['fca_h']*(1-x)
+        fca_h = self.AC_params['fca_h']#*x + self.BC_params['fca_h']*(1-x)
         fca_h *= (T/self.T_HS)**self.dT_coeffs['fca_h_P']
         return self._set_dimension(fca_h, 'fca_h')
+    
 
     def g0(self, T=None):
         """Material gain constant"""
@@ -316,6 +387,7 @@ class material_AlGaAs:
 
         Ntr = self.ar_params['N_tr'] + self.dT_coeffs['d_Ntr']*dT
         return self._set_dimension(Ntr, 'N_tr')
+    
 
     def set_initial_params(self, x=0, T=None, params_dict=None):
         """Function for setuping initial structure parameters"""
@@ -323,29 +395,22 @@ class material_AlGaAs:
         
         # for active region params
         if params_dict is not None: 
-            params = params_dict.copy()
-            if all(p in params_dict.keys() for p in material_params):
-                Nc = self.Nc(m_e=params_dict['m_e']) 
-                Nv = self.Nv(m_h=params_dict['m_h'])
-                params.pop('m_e')
-                params.pop('m_h')
-                params.update({'Nc': Nc, 'Nv': Nv})
-            return params
+            
+            return params_dict
 
         # for layers AlGaAs params
-        _, Ec, Ev = self.Eg_AlGaAs(x=x)
         n_refr, eps = self.n_refr(x=x)
 
-        params = dict(Ev=Ev, Ec=Ec, Nc=self.Nc(x=x), Nv=self.Nv(x=x), 
+        params = dict(Ev=self.Ev(x=x), Ec=self.Ec(x=x), 
+                      Nc=self.Nc(x=x), Nv=self.Nv(x=x), 
                       mu_n=self.mu_n(x=x), mu_p=self.mu_p(x=x),
                       tau_n=self.tau_n(x=x), tau_p=self.tau_p(x=x),
                       B=self.B(x=x), Cn=self.Cn(x=x), Cp=self.Cp(x=x),
                       eps=eps, n_refr=n_refr, 
                       fca_e=self.fca_e(x=x), fca_h=self.fca_h(x=x), x=x)
         return params
-
-    def update_all_params(self, is_dimensionless, T=None):
-        """Temperature update of all params"""
-
-        assert self.x_profile is not None
-        pass
+    
+    
+    
+    
+    

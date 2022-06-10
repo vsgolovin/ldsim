@@ -16,6 +16,9 @@ layers = ['n_contact', 'grad', 'n_cladding', 'grad', 'n_waveguide',
 d = [0.25, 0.1, 1.4, 0.1, 0.45, 0.03, 0.45, 0.1, 1.4, 0.1, 0.25]
 d = [i*1e-4 for i in d]
 
+# material system for each layer
+composition = [1] * len(d)
+composition_keys = {'AlGaAs': 1}
 # composition: X for Al(x)Ga(1-x)As
 x = [0, 'grad', 0.4, 'grad', 0.25, 0, 0.25, 'grad', 0.4, 'grad', 0]
 
@@ -23,8 +26,9 @@ x = [0, 'grad', 0.4, 'grad', 0.25, 0, 0.25, 'grad', 0.4, 'grad', 0]
 Nd = [1e18, 'grad', 5e17, 'grad', 1e17, 2e16, 0, 'grad', 0, 'grad', 0]
 Na = [0, 'grad', 0, 'grad', 0, 0, 1e17, 'grad', 1e18, 'grad', 2e18]
 
-assert len(d) == len(x) == len(Nd) == len(Na) == len(layers)
-layers_design = dict(names=layers, thickness=d, x=x, Nd=Nd, Na=Na)
+assert len(d) == len(x)== len(composition) == len(Nd) == len(Na) == len(layers)
+layers_design = dict(names=layers, thickness=d, x=x, composition=composition, 
+                     composition_keys=composition_keys, Nd=Nd, Na=Na)
 
 #%% Define material parameters 
 
