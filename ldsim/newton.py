@@ -2,7 +2,7 @@
 Defines a class for solving systems of equations using Newton's method.
 """
 
-from typing import Union
+from typing import Union, Tuple
 import numpy as np
 from scipy.linalg import solve_banded
 from ldsim import semicond
@@ -186,7 +186,7 @@ class EquilibriumSolver1d(NewtonSolver):
 def transport_system(xn: np.ndarray, vn: dict, xb: np.ndarray, vb: dict,
                      sol: dict, q: float, eps_0: float,
                      index: Union[int, None] = None
-                     ) -> tuple[np.ndarray, list, np.ndarray]:
+                     ) -> Tuple[np.ndarray, list, np.ndarray]:
     # shorthand function to access either array itself (1D model)
     # or 1D slice of 2D array (2D model)
     def get(array):
