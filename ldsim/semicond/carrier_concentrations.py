@@ -2,7 +2,6 @@
 Formulas for caclculating carrier concentrations and their derivatives.
 """
 
-import numpy as np
 from .prob_functions import fermi_approx as pf
 from .prob_functions import fermi_dot_approx as pfd
 

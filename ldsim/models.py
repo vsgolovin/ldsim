@@ -156,7 +156,7 @@ class LaserDiodeModel1d(LaserDiode):
     def solve_equilibrium(self, maxiter=100, fluct=1e-8, omega=1.0):
         """
         Calculate electrostatic potential distribution at equilibrium (zero
-        external bias). Uses Newton's method implemented in `NewtonSolver`.
+        external bias) using Newton's method.
 
         Parameters
         ----------
@@ -1001,7 +1001,7 @@ class LaserDiodeModel2d(LaserDiodeModel1d):
 
     def solve_lcn(self, maxiter=100, fluct=1e-8, omega=1.0):
         """
-        Find potential distribution at zero external bial assuming local charge
+        Find potential distribution at zero external bias assuming local charge
         neutrality via Newtons's method.
 
         Parameters
@@ -1035,7 +1035,7 @@ class LaserDiodeModel2d(LaserDiodeModel1d):
     def solve_equilibrium(self, maxiter=100, fluct=1e-8, omega=1.0):
         """
         Calculate electrostatic potential distribution at equilibrium (zero
-        external bias). Uses Newton's method implemented in `NewtonSolver`.
+        external bias) using Newton's method.
 
         Parameters
         ----------

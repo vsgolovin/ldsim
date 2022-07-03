@@ -121,12 +121,10 @@ class Layer:
             p_Nd = [0.0] * (-delta) + p_Nd
         dct['C_dop'] = [Nd - Na for Nd, Na in zip(p_Nd, p_Na)]
 
-    def make_gradient_layer(self, other, name, thickness, active=False, deg=1):
+    def make_gradient_layer(self, other, name, thickness, active=False):
         """
-        Create a layer where all parameters gradually change from their
+        Create a layer where all parameters change linearly from their
         endvalues in the current layer to values in `other` at x = 0.
-        By default all parameters change linearly, this can be change by
-        increasing polynomial degree `deg`.
 
         Z-axis dependency is same as in `self`.
         """
@@ -136,7 +134,7 @@ class Layer:
         for key in self.dct_x:
             f[0] = self.calculate(key, self.dx)
             f[1] = other.calculate(key, 0)
-            p = np.polyfit(x=x, y=f, deg=deg)
+            p = np.polyfit(x=x, y=f, deg=1)
             layer_new.update({key: p}, axis='x')
         layer_new.update(self.dct_z, axis='z')
         return layer_new
