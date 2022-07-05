@@ -1,18 +1,17 @@
-# -*- coding: utf-8 -*-
 """
 Unit values for nondimensionalization.
 """
-
-import constants as const
+import ldsim.constants as const
 
 t = 1e-9
-E = const.kb*const.T
+T = 300
+E = const.kb * T
 V = E / 1.0
 q = const.q
-x = q / (const.eps_0*V)
+x = q / (const.eps_0 * V)
 n = 1 / x**3
-mu = x**2 / (V*t)
-j = q / (t*x**2)
+mu = x**2 / (V * t)
+j = q / (t * x**2)
 P = E / t
 
 dct = {'Ev': E, 'Ec': E, 'Eg': E, 'Nd': n, 'Na': n, 'C_dop': n,
@@ -24,6 +23,7 @@ dct = {'Ev': E, 'Ec': E, 'Eg': E, 'Nd': n, 'Na': n, 'C_dop': n,
        'psi': V, 'phi_n': V, 'phi_p': V, 'n': n, 'p': n,
        'dn_dpsi': n / V, 'dn_dphin': n / V,
        'dp_dpsi': n / V, 'dp_dphip': n / V,
-       'g0': 1 / x, 'N_tr': n, 'S': n * x,
+       'g0': 1 / x, 'N_tr': n, 'S': n * x, 'gain': 1 / x,
        'fca_e': 1 / (n * x), 'fca_h': 1 / (n * x),
-       'jn': j, 'jp': j}
+       'jn': j, 'jp': j, 'T': T, 'Vt': E,
+       'R_srh': 1 / t, 'R_rad': 1 / t, 'R_aug': 1 / t, 'R_st': 1 / t}

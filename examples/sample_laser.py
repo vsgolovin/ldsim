@@ -1,9 +1,8 @@
-# -*- coding: utf-8 -*-
 """
-Sample epitaxial design.
+Sample laser design.
 """
 
-from design import Layer, EpiDesign
+from ldsim.preprocessing.design import Layer, LaserDiode
 
 
 # material parameters for different AlGaAs alloys
@@ -19,42 +18,43 @@ d40 = dict(Ev=-0.2, Ec=1.724, Nc=7.5e17, Nv=1.2e19, mu_n=800, mu_p=100,
 
 
 # create Layer objects
-ncont = Layer(name='n-contact', dx=0.25e-4)
+ncont = Layer(name='n-contact', thickness=0.25e-4)
 ncont.update(d0)
 ncont.update({'Nd': 1e18})
 
-ncl = Layer(name='n-cladding', dx=1.4e-4)
+ncl = Layer(name='n-cladding', thickness=1.4e-4)
 ncl.update(d40)
 ncl.update({'Nd': 5e17})
 
 ngrad2 = ncont.make_gradient_layer(ncl, 'gradient', 0.1e-4)
 
-nwg = Layer(name='n-waveguide', dx=0.45e-4)
+nwg = Layer(name='n-waveguide', thickness=0.45e-4)
 nwg.update(d25)
 nwg.update({'Nd': 1e17})
 
 ngrad = ncl.make_gradient_layer(nwg, 'gradient', 0.1e-4)
 
-act = Layer(name='active', dx=0.03e-4, active=True)
+act = Layer(name='active', thickness=0.03e-4, active=True)
 act.update(d0)
 act.update({'Nd': 2e16, 'g0': 1500, 'N_tr': 1.85e18})
 
-pwg = Layer(name='p-waveguide', dx=0.45e-4)
+pwg = Layer(name='p-waveguide', thickness=0.45e-4)
 pwg.update(d25)
 pwg.update({'Na': 1e17})
 
-pcl = Layer(name='p-cladding', dx=1.4e-4)
+pcl = Layer(name='p-cladding', thickness=1.4e-4)
 pcl.update(d40)
 pcl.update({'Na': 1e18})
 
 pgrad = pwg.make_gradient_layer(pcl, 'gradient', 0.1e-4)
 
-pcont = Layer(name='p-contact', dx=0.25e-4)
+pcont = Layer(name='p-contact', thickness=0.25e-4)
 pcont.update(d0)
 pcont.update({'Na': 2e18})
 
 pgrad2 = pcl.make_gradient_layer(pcont, 'gradient', 0.1e-4)
 
 # create design as a list of layers
-epi = EpiDesign([ncont, ngrad2, ncl, ngrad, nwg, act, pwg, pgrad, pcl,
-                 pgrad2, pcont])
+layers = [ncont, ngrad2, ncl, ngrad, nwg, act, pwg, pgrad, pcl, pgrad2, pcont]
+laser = LaserDiode(layers, L=0.3, w=0.01, R1=0.95, R2=0.05, lam=0.87e-4,
+                   ng=3.9, alpha_i=0.5, beta_sp=1e-5)

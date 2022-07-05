@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 A collection of functions for solving Poisson's equation at equilibrium.
 """
@@ -8,14 +7,12 @@ import numpy as np
 
 def intrinsic_concentration(Nc, Nv, Ec, Ev, Vt):
     "Calculate intrinsic carrier concentration."
-    ni = np.sqrt(Nc*Nv)*np.exp( (Ev-Ec) / (2*Vt) )
-    return ni
+    return np.sqrt(Nc * Nv) * np.exp((Ev - Ec) / (2 * Vt))
 
 
 def intrinsic_level(Nc, Nv, Ec, Ev, Vt):
     "Calculate Fermi level location in an intrinsic semiconductor."
-    Ei = (Ec+Ev)/2 + Vt/2*np.log(Nv/Nc)
-    return Ei
+    return (Ec + Ev) / 2 + Vt / 2 * np.log(Nv / Nc)
 
 
 def Ef_lcn_boltzmann(C_dop, ni, Ei, Vt):
@@ -24,8 +21,7 @@ def Ef_lcn_boltzmann(C_dop, ni, Ei, Vt):
     Boltzmann statistics.
     """
     xi = np.arcsinh(C_dop/(2*ni))
-    Ef = xi*Vt + Ei
-    return Ef
+    return xi * Vt + Ei
 
 
 def poisson_res(psi, n, p, h, w, eps, eps_0, q, C_dop):
@@ -36,7 +32,7 @@ def poisson_res(psi, n, p, h, w, eps, eps_0, q, C_dop):
                         -(1/h[1:  ]+1/h[:-1])*psi[1:-1]
                         + 1/h[ :-1]          *psi[ :-2] )
     rhs = q/eps_0 * (C_dop[1:-1] - n[1:-1] + p[1:-1]) * w
-    return -lhs+rhs
+    return rhs - lhs
 
 
 def poisson_jac(psi, n, ndot, p, pdot, h, w, eps, eps_0, q, C_dop):
