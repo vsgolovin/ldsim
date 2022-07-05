@@ -986,11 +986,13 @@ class LaserDiodeModel2d(LaserDiodeModel1d):
         else:
             zn = self.zn[:, 0]
 
+        results = []
         for i in range(self.mz):
             rv = LaserDiode.solve_waveguide(
                 self, z=zn[i], step=step, n_modes=n_modes,
                 remove_layers=remove_layers
             )
+            results.append(rv)
             j = np.argmax(rv['gammas'])
             self.gamma[i] = rv['gammas'][j]
             self.n_eff[i] = rv['n_eff'][j]
@@ -998,6 +1000,8 @@ class LaserDiodeModel2d(LaserDiodeModel1d):
 
         if self.xn is not None:
             self._update_waveguide_mode()
+
+        return results
 
     def solve_lcn(self, maxiter=100, fluct=1e-8, omega=1.0):
         """
