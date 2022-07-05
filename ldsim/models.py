@@ -95,28 +95,31 @@ class LaserDiodeModel1d(LaserDiode):
         self.ar_ix = self._get_ar_mask(self.xn)
         self._calculate_all_params()
 
-    def _calculate_all_params(self):
+    def _calculate_all_params(self, z=None):
         """
         Calculate values of all parameters at mesh nodes and boundaries.
         """
+        if z is None:
+            z = np.zeros_like(self.xn)
         # nodes
         inds, dx = self._inds_dx(self.xn)
         for param in input_params_nodes:
             if param in params_active:
                 continue
             self.vn[param] = self.calculate(
-                param, self.xn, z=0, inds=inds, dx=dx)
+                param, self.xn, z=z, inds=inds, dx=dx)
         # active region
         inds, dx = inds[self.ar_ix], dx[self.ar_ix]
         for param in params_active:
             self.vn[param] = self.calculate(
-                param, self.xn[self.ar_ix], z=0, inds=inds, dx=dx)
+                param, self.xn[self.ar_ix], z=z[self.ar_ix], inds=inds, dx=dx)
 
         # boundaries
         inds, dx = self._inds_dx(self.xb)
+        zb = z[..., :-1]
         for param in input_params_boundaries:
             self.vb[param] = self.calculate(
-                param, self.xb, z=0, inds=inds, dx=dx)
+                param, self.xb, z=zb, inds=inds, dx=dx)
 
         # waveguide mode
         if self.gamma is not None:  # calculated waveguide mode profile
@@ -954,7 +957,7 @@ class LaserDiodeModel2d(LaserDiodeModel1d):
         self.zn = np.tile(zn[:, np.newaxis], (1, len(xn)))
         self.zb = np.tile(z[:, np.newaxis], (1, len(xn)))
         self.ar_ix = self._get_ar_mask(self.xn)
-        self._calculate_all_params()
+        self._calculate_all_params(z=self.zn)
 
     def solve_waveguide(self, step=1e-7, n_modes=3, remove_layers=(0, 0)):
         """
