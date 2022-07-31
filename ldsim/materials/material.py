@@ -1,4 +1,4 @@
-from typing import Iterable, Callable
+from typing import Iterable, Callable, Dict
 
 
 class Material:
@@ -31,6 +31,10 @@ class Material:
         self.args[name] = args
         for arg in args:
             self.params[arg].append(name)
+
+    def set_params(self, params: Dict[str, Callable]):
+        for name, func in params.items():
+            self.set_param(name, func)
 
     def remove_param(self, name: str) -> bool:
         """
