@@ -26,7 +26,7 @@ class Material:
         """
         self.remove_param(name)
         self.functions[name] = func
-        args = func.__code__.co_varnames
+        args = func.__code__.co_varnames[:func.__code__.co_argcount]
         assert all(a in self.params.keys() for a in args), 'Unknown argument'
         self.args[name] = args
         for arg in args:
