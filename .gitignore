@@ -143,6 +143,9 @@ cython_debug/
 # program output
 results/
 
+# temporary scripts for testing
+temp/
+
 ## Core latex/pdflatex auxiliary files:
 *.aux
 *.lof
