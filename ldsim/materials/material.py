@@ -1,4 +1,4 @@
-from typing import Iterable, Callable, Dict
+from typing import Iterable, Callable, Dict, Tuple
 
 
 class Material:
@@ -19,6 +19,10 @@ class Material:
         self.functions = {}                      # parameters
         self.params = {arg: [] for arg in args}  # arguments
         self.args = {}                           # parameters
+
+    def get_arguments(self) -> Tuple[str]:
+        "Return a tuple of arguments required for calculations."
+        return tuple(self.params.keys())
 
     def set_param(self, name: str, func: Callable):
         """

@@ -2,10 +2,11 @@
 Classes for defining laser diode vertical (epitaxial) and lateral design.
 """
 
-from typing import Union
+from typing import Union, Dict
 import numpy as np
 from scipy.interpolate import interp1d
 from ldsim import constants as const, units
+from ldsim.materials import Material
 from .waveguide import solve_wg
 
 
@@ -48,6 +49,9 @@ class BaseLayer:
     def __str__(self):
         return self.name
 
+    def get_thickness(self):
+        return self.dx
+
     def calculate(self, param: str, x: Union[float, np.ndarray],
                   z: Union[float, np.ndarray] = 0.0):
         raise NotImplementedError
@@ -73,9 +77,6 @@ class Layer(BaseLayer):
         elif axis == 'z':
             return self.dct_z
         raise ValueError(f'Unknown axis {axis}.')
-
-    def get_thickness(self):
-        return self.dx
 
     def calculate(self, param, x, z=0.0):
         "Calculate value of parameter `param` at location (`x`, `z`)."
@@ -141,6 +142,45 @@ class Layer(BaseLayer):
             layer_new.update({key: p}, axis='x')
         layer_new.update(self.dct_z, axis='z')
         return layer_new
+
+
+class MaterialLayer(BaseLayer):
+    def __init__(self, material: Material, name: str, thickness: float,
+                 active: bool = False):
+        super().__init__(name, thickness, active)
+        assert isinstance(material, Material)
+        self.material = material
+        args = material.get_arguments()
+        self.dct_x = dict.fromkeys(args, [np.nan])
+        self.dct_z = dict.fromkeys(args, [])
+
+    def _choose_dict(self, axis) -> Dict[str, list]:
+        if axis == 'x':
+            return self.dct_x
+        elif axis == 'z':
+            return self.dct_z
+        raise ValueError(f'Unknown axis {axis}.')
+
+    def update(self, d: dict, axis: str = 'x'):
+        assert isinstance(d, dict)
+        dct = self._choose_dict(axis)
+        for k, v in d.items():
+            if k not in dct:
+                raise ValueError(f'Unknown parameter {k}')
+            if isinstance(v, (int, float)):
+                dct[k] = [v]
+            else:
+                dct[k] = list(v)
+
+    def calculate(self, param: str, x: Union[float, np.ndarray],
+                  z: Union[float, np.ndarray] = 0.0):
+        # calculate values of arguments (alloy composition, temperature, etc)
+        kwargs = {}
+        for key in self.dct_x:
+            p_x = self.dct_x[key]
+            p_z = self.dct_z[key]
+            kwargs[key] = np.polyval(p_x, x) + np.polyval(p_z + [0.0], z)
+        return self.material.calculate(param, **kwargs)
 
 
 class LaserDiode:
