@@ -2,6 +2,7 @@
 Classes for defining laser diode vertical (epitaxial) and lateral design.
 """
 
+from typing import Union
 import numpy as np
 from scipy.interpolate import interp1d
 from ldsim import constants as const, units
@@ -15,25 +16,46 @@ params_active = ('g0', 'N_tr')
 DEFAULT_TEMPERATURE = 300.0
 
 
-class Layer:
-    def __init__(self, name, thickness, active=False):
+class BaseLayer:
+    def __init__(self, name: str, thickness: float, active: bool = False):
         """
-        Semiconductor diode layer.
+        Base class for diode laser layers.
 
         Parameters
         ----------
-            name : str
-                Layer name.
-            thickness : float
-                Layer thickness (cm).
-            active : bool
-                Whether layer is a part of active region, i.e. takes part
-                in stimulated light emission.
+        name : str
+            Layer name.
+        thickness : float
+            Layer thickness (cm).
+        active : bool
+            Whether layer is a part of active region, i.e. takes part
+            in stimulated light emission.
 
         """
         self.name = name
         self.dx = thickness
         self.active = active
+
+    def __repr__(self):
+        s1 = 'Layer \"{}\"'.format(self.name)
+        s2 = '{} um'.format(self.dx * 1e4)
+        if self.active:
+            s3 = 'active'
+        else:
+            s3 = 'not active'
+        return ' / '.join((s1, s2, s3))
+
+    def __str__(self):
+        return self.name
+
+    def calculate(self, param: str, x: Union[float, np.ndarray],
+                  z: Union[float, np.ndarray] = 0.0):
+        raise NotImplementedError
+
+
+class Layer(BaseLayer):
+    def __init__(self, name: str, thickness: float, active: bool = False):
+        super().__init__(name, thickness, active)
 
         # initialize `dct_x` and `dct_z`, that store spatial dependencies of
         # all the parameters as lists of polynomial coefficients
@@ -44,25 +66,6 @@ class Layer:
         if active:
             self.dct_x.update(dict.fromkeys(params_active, [np.nan]))
             self.dct_z.update(dict.fromkeys(params_active, [1.0]))
-
-    def __repr__(self):
-        s1 = 'Layer \"{}\"'.format(self.name)
-        s2 = '{} um'.format(self.dx * 1e4)
-        Cdop = self.calculate('C_dop', [0, self.dx])
-        if Cdop[0] > 0 and Cdop[1] > 0:
-            s3 = 'n-type'
-        elif Cdop[0] < 0 and Cdop[1] < 0:
-            s3 = 'p-type'
-        else:
-            s3 = 'i-type'
-        if self.active:
-            s4 = 'active'
-        else:
-            s4 = 'not active'
-        return ' / '.join((s1, s2, s3, s4))
-
-    def __str__(self):
-        return self.name
 
     def _choose_dict(self, axis):
         if axis == 'x':
