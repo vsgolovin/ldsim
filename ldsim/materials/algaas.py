@@ -8,6 +8,18 @@ def bandgap(x, T=300.):
     Eg_x = 1.981 + 0.124 * x + 0.144 * x**2 - 4.6e-4 * T**2 / (T + 204.)
     return np.minimum(Eg_gamma, Eg_x)
 
+def dEc_dEg(x):
+    return np.piecewise(x, [x <= 0.45, x > 0.45],
+                        [0.6, lambda t: 0.6 - (t - 0.45) * 0.4])
+
+def conduction_band_bottom(x, T=300.):
+    Eg_base = bandgap(0., 300.)
+    return Eg_base + (bandgap(x, T) - Eg_base) * dEc_dEg(x)
+
+def valence_band_top(x, T=300.):
+    Eg_base = bandgap(0., 300.)
+    return 0.0 - (bandgap(x, T) - Eg_base) * (1 - dEc_dEg(x))
+
 def electron_dos_effective_mass(x):
     return np.piecewise(x, [x < 0.45, x >= 0.45],
                         [lambda t: 0.063 + 0.083 * t,
@@ -27,7 +39,7 @@ def vb_effective_dos(x, T=300.):
 def electron_mobility(x):
     p_direct = np.array([1e4, -2.2e4, 8e3])
     p_indirect = np.array([-720., 1160., -255])
-    return np.piecewise(x, [x < 0.45, x > 0.45],
+    return np.piecewise(x, [x <= 0.45, x > 0.45],
                         [lambda t: np.polyval(p_direct, t),
                          lambda t: np.polyval(p_indirect, t)])
 
@@ -95,23 +107,27 @@ def free_carrier_absorption_holes():
     return 12e-18
 
 
-algaas = Material('AlGaAs', ('x', 'T', 'wavelength'))
-algaas.set_params({
-    'Eg': bandgap,
-    'Nc': cb_effective_dos,
-    'Nv': vb_effective_dos,
-    'mu_n': electron_mobility,
-    'mu_p': hole_mobility,
-    'tau_n': srh_electron_lifetime,
-    'tau_p': srh_hole_lifetime,
-    'B': radiative_recombination_coeff,
-    'Cn': auger_coefficient_n,
-    'Cp': auger_coefficient_p,
-    'eps': permittivity,
-    'n_refr': refractive_index,
-    'fca_e': free_carrier_absorption_electrons,
-    'fca_h': free_carrier_absorption_holes,
-})
+class AlGaAs(Material):
+    def __init__(self, name='AlGaAs', args=('x', 'T', 'wavelength')):
+        super().__init__(name, args)
+        self.set_params({
+            'Eg': bandgap,
+            'Ec': conduction_band_bottom,
+            'Ev': valence_band_top,
+            'Nc': cb_effective_dos,
+            'Nv': vb_effective_dos,
+            'mu_n': electron_mobility,
+            'mu_p': hole_mobility,
+            'tau_n': srh_electron_lifetime,
+            'tau_p': srh_hole_lifetime,
+            'B': radiative_recombination_coeff,
+            'Cn': auger_coefficient_n,
+            'Cp': auger_coefficient_p,
+            'eps': permittivity,
+            'n_refr': refractive_index,
+            'fca_e': free_carrier_absorption_electrons,
+            'fca_h': free_carrier_absorption_holes,
+        })
 
 
 if __name__ == '__main__':

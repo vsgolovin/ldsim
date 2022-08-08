@@ -58,9 +58,14 @@ class Material:
         Calculate material parameter `param` using optional keyword arguments.
         Return type depends on the original function, normally `numpy.ndarray`.
         """
+        if param == 'C_dop':
+            return self._calculate_Cdop(**kwargs)
         args = self.args[param]
         filtered = {arg: kwargs[arg] for arg in args}
         return self.functions[param](**filtered)
+
+    def _calculate_Cdop(self, **kwargs):
+        return self.calculate('Nd', **kwargs) - self.calculate('Na', **kwargs)
 
     def calculate_all(self, **kwargs) -> dict:
         """
