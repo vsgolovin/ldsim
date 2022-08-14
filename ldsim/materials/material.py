@@ -16,6 +16,8 @@ class Material:
         """
         self.name = name
         # dictionaries: name = values, comment = keys
+        # `function(*arguments) -> parameter value`
+        # word `parameter` offen refers to a key (string, e.g., "Eg" or "Nc")
         self.functions = {}                      # parameters
         self.params = {arg: [] for arg in args}  # arguments
         self.args = {}                           # parameters
