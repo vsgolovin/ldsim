@@ -2,7 +2,7 @@
 Classes for defining laser diode vertical (epitaxial) and lateral design.
 """
 
-from typing import Union, Dict
+from typing import Union
 import numpy as np
 from scipy.interpolate import interp1d
 from ldsim import constants as const, units
@@ -10,14 +10,11 @@ from ldsim.materials import Material
 from .waveguide import solve_wg
 
 
-params = ('Ev', 'Ec', 'Nd', 'Na', 'Nc', 'Nv', 'mu_n', 'mu_p', 'tau_n',
-          'tau_p', 'B', 'Cn', 'Cp', 'eps', 'n_refr', 'Eg', 'C_dop',
-          'fca_e', 'fca_h', 'T')
-params_active = ('g0', 'N_tr')
-DEFAULT_TEMPERATURE = 300.0
-
-
 class BaseLayer:
+    DEFAULT_PARAMS = {'T': 300.0, 'Nd': 0.0, 'Na': 0.0, 'C_dop': 0.0}
+    REQUIRED_PARAMS = ()
+    ACTIVE_PARAMS = ('g0', 'N_tr')
+
     def __init__(self, name: str, thickness: float, active: bool = False):
         """
         Base class for diode laser layers.
@@ -37,6 +34,19 @@ class BaseLayer:
         self.dx = thickness
         self.active = active
 
+        # dictionaries with polynomial coefficients for physical parameters
+        # coefficient format same as in `numpy.polyval`
+        params = self.REQUIRED_PARAMS
+        if active:
+            params = params + self.ACTIVE_PARAMS
+        # use `nan` to make undefined params more noticeable
+        self.dct_x = dict.fromkeys(params, [np.nan])
+        self.dct_z = dict.fromkeys(params, [])  # constant term omitted
+
+        # initial values for temperature and doping densities
+        self.update(self.DEFAULT_PARAMS, 'x', is_new=True)
+        self.update({k: [] for k in self.DEFAULT_PARAMS}, 'z', is_new=True)
+
     def __repr__(self):
         s1 = 'Layer \"{}\"'.format(self.name)
         s2 = '{} um'.format(self.dx * 1e4)
@@ -52,67 +62,32 @@ class BaseLayer:
     def get_thickness(self):
         return self.dx
 
+    def _choose_dict(self, axis):
+        "Choose dictionary of polynomials for `axis`"
+        if axis not in ('x', 'z'):
+            raise ValueError(f'Unknown axis {axis}')
+        return self.dct_x if axis == 'x' else self.dct_z
+
     def calculate(self, param: str, x: Union[float, np.ndarray],
                   z: Union[float, np.ndarray] = 0.0):
         raise NotImplementedError
 
-
-class Layer(BaseLayer):
-    def __init__(self, name: str, thickness: float, active: bool = False):
-        super().__init__(name, thickness, active)
-
-        # initialize `dct_x` and `dct_z`, that store spatial dependencies of
-        # all the parameters as lists of polynomial coefficients
-        self.dct_x = dict.fromkeys(params, [np.nan])
-        self.dct_x['C_dop'] = self.dct_x['Nd'] = self.dct_x['Na'] = [0.0]
-        self.dct_x['T'] = [DEFAULT_TEMPERATURE]
-        self.dct_z = dict.fromkeys(params, [])
-        if active:
-            self.dct_x.update(dict.fromkeys(params_active, [np.nan]))
-            self.dct_z.update(dict.fromkeys(params_active, [1.0]))
-
-    def _choose_dict(self, axis):
-        if axis == 'x':
-            return self.dct_x
-        elif axis == 'z':
-            return self.dct_z
-        raise ValueError(f'Unknown axis {axis}.')
-
-    def calculate(self, param, x, z=0.0):
-        "Calculate value of parameter `param` at location (`x`, `z`)."
-        p_x = self.dct_x[param]
-        p_z = self.dct_z[param]
-        return np.polyval(p_x, x) + np.polyval(p_z + [0.0], z)
-
-    def update(self, d, axis='x'):
-        "Update polynomial coefficients of parameters."
-        # check input
+    def update(self, d: dict, axis: str = 'x', is_new: bool = False):
+        """
+        Update x- or z-axis dependencies of parameters according to contents
+        of dictionary `d` that maps parameter names to polynomial coefficients.
+        """
         assert isinstance(d, dict)
         dct = self._choose_dict(axis)
-
-        # update dictionary values
         for k, v in d.items():
-            if k not in self.dct_x:
-                raise Exception(f'Unknown parameter {k}')
+            if not is_new and k not in dct:
+                raise ValueError(f'Unknown parameter {k}')
             if isinstance(v, (int, float)):
                 dct[k] = [v]
             else:
                 dct[k] = list(v)
-        if 'Ec' in d or 'Ev' in d:
-            self._update_Eg(axis)
-        if 'Nd' in d or 'Na' in d:
-            self._update_Cdop(axis)
-
-    def _update_Eg(self, axis):
-        dct = self._choose_dict(axis)
-        p_Ec = dct['Ec']
-        p_Ev = dct['Ev']
-        delta = len(p_Ec) - len(p_Ev)
-        if delta > 0:
-            p_Ev = [0.0] * delta + p_Ev
-        elif delta < 0:
-            p_Ec = [0.0] * (-delta) + p_Ec
-        dct['Eg'] = [Ec - Ev for Ec, Ev in zip(p_Ec, p_Ev)]
+            if not is_new and (k == 'Nd' or k == 'Na'):
+                self._update_Cdop(axis)
 
     def _update_Cdop(self, axis):
         dct = self._choose_dict(axis)
@@ -124,6 +99,34 @@ class Layer(BaseLayer):
         elif delta < 0:
             p_Nd = [0.0] * (-delta) + p_Nd
         dct['C_dop'] = [Nd - Na for Nd, Na in zip(p_Nd, p_Na)]
+
+
+class Layer(BaseLayer):
+    REQUIRED_PARAMS = (
+        'Ev', 'Ec', 'Eg', 'Nc', 'Nv', 'mu_n', 'mu_p', 'tau_n', 'tau_p',
+        'B', 'Cn', 'Cp', 'eps', 'n_refr', 'fca_e', 'fca_h', 'T')
+
+    def calculate(self, param, x, z=0.0):
+        "Calculate value of parameter `param` at location (`x`, `z`)."
+        p_x = self.dct_x[param]
+        p_z = self.dct_z[param]
+        return np.polyval(p_x, x) + np.polyval(p_z + [0.0], z)
+
+    def update(self, d, axis='x', is_new=False):
+        super().update(d, axis, is_new)
+        if 'Ec' in d or 'Ev' in d:
+            self._update_Eg(axis)
+
+    def _update_Eg(self, axis):
+        dct = self._choose_dict(axis)
+        p_Ec = dct['Ec']
+        p_Ev = dct['Ev']
+        delta = len(p_Ec) - len(p_Ev)
+        if delta > 0:
+            p_Ev = [0.0] * delta + p_Ev
+        elif delta < 0:
+            p_Ec = [0.0] * (-delta) + p_Ec
+        dct['Eg'] = [Ec - Ev for Ec, Ev in zip(p_Ec, p_Ev)]
 
     def make_gradient_layer(self, other, name, thickness, active=False):
         """
@@ -151,26 +154,8 @@ class MaterialLayer(BaseLayer):
         assert isinstance(material, Material)
         self.material = material
         args = material.get_arguments()
-        self.dct_x = dict.fromkeys(args, [np.nan])
-        self.dct_z = dict.fromkeys(args, [])
-
-    def _choose_dict(self, axis) -> Dict[str, list]:
-        if axis == 'x':
-            return self.dct_x
-        elif axis == 'z':
-            return self.dct_z
-        raise ValueError(f'Unknown axis {axis}.')
-
-    def update(self, d: dict, axis: str = 'x'):
-        assert isinstance(d, dict)
-        dct = self._choose_dict(axis)
-        for k, v in d.items():
-            if k not in dct:
-                raise ValueError(f'Unknown parameter {k}')
-            if isinstance(v, (int, float)):
-                dct[k] = [v]
-            else:
-                dct[k] = list(v)
+        self.dct_x.update(dict.fromkeys(args, [np.nan]))
+        self.dct_z.update(dict.fromkeys(args, []))
 
     def calculate(self, param: str, x: Union[float, np.ndarray],
                   z: Union[float, np.ndarray] = 0.0):
