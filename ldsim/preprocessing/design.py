@@ -43,7 +43,7 @@ class Layer:
         self.dct_z = dict.fromkeys(params, [])
         if active:
             self.dct_x.update(dict.fromkeys(params_active, [np.nan]))
-            self.dct_z.update(dict.fromkeys(params_active, [1.0]))
+            self.dct_z.update(dict.fromkeys(params_active, []))
 
     def __repr__(self):
         s1 = 'Layer \"{}\"'.format(self.name)
