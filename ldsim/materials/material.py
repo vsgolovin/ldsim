@@ -26,6 +26,10 @@ class Material:
         "Return a tuple of arguments required for calculations."
         return tuple(self.params.keys())
 
+    def get_parameters(self) -> Tuple[str]:
+        "Return a tuple of parameters defined by material."
+        return tuple(self.functions.keys())
+
     def set_param(self, name: str, func: Callable):
         """
         Add material parameter `name` as a function `func`.
