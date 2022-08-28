@@ -2,7 +2,7 @@
 Sample laser design.
 """
 
-from ldsim.preprocessing.design import Layer, LaserDiode
+from ldsim.preprocessing.design import CustomLayer, LaserDiode
 
 
 # material parameters for different AlGaAs alloys
@@ -18,37 +18,37 @@ d40 = dict(Ev=-0.2, Ec=1.724, Nc=7.5e17, Nv=1.2e19, mu_n=800, mu_p=100,
 
 
 # create Layer objects
-ncont = Layer(name='n-contact', thickness=0.25e-4)
+ncont = CustomLayer(name='n-contact', thickness=0.25e-4)
 ncont.update(d0)
 ncont.update({'Nd': 1e18})
 
-ncl = Layer(name='n-cladding', thickness=1.4e-4)
+ncl = CustomLayer(name='n-cladding', thickness=1.4e-4)
 ncl.update(d40)
 ncl.update({'Nd': 5e17})
 
 ngrad2 = ncont.make_gradient_layer(ncl, 'gradient', 0.1e-4)
 
-nwg = Layer(name='n-waveguide', thickness=0.45e-4)
+nwg = CustomLayer(name='n-waveguide', thickness=0.45e-4)
 nwg.update(d25)
 nwg.update({'Nd': 1e17})
 
 ngrad = ncl.make_gradient_layer(nwg, 'gradient', 0.1e-4)
 
-act = Layer(name='active', thickness=0.03e-4, active=True)
+act = CustomLayer(name='active', thickness=0.03e-4, active=True)
 act.update(d0)
 act.update({'Nd': 2e16, 'g0': 1500, 'N_tr': 1.85e18})
 
-pwg = Layer(name='p-waveguide', thickness=0.45e-4)
+pwg = CustomLayer(name='p-waveguide', thickness=0.45e-4)
 pwg.update(d25)
 pwg.update({'Na': 1e17})
 
-pcl = Layer(name='p-cladding', thickness=1.4e-4)
+pcl = CustomLayer(name='p-cladding', thickness=1.4e-4)
 pcl.update(d40)
 pcl.update({'Na': 1e18})
 
 pgrad = pwg.make_gradient_layer(pcl, 'gradient', 0.1e-4)
 
-pcont = Layer(name='p-contact', thickness=0.25e-4)
+pcont = CustomLayer(name='p-contact', thickness=0.25e-4)
 pcont.update(d0)
 pcont.update({'Na': 2e18})
 

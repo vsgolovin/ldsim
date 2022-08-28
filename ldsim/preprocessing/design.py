@@ -101,7 +101,7 @@ class BaseLayer:
         dct['C_dop'] = [Nd - Na for Nd, Na in zip(p_Nd, p_Na)]
 
 
-class Layer(BaseLayer):
+class CustomLayer(BaseLayer):
     REQUIRED_PARAMS = (
         'Ev', 'Ec', 'Eg', 'Nc', 'Nv', 'mu_n', 'mu_p', 'tau_n', 'tau_p',
         'B', 'Cn', 'Cp', 'eps', 'n_refr', 'fca_e', 'fca_h', 'T')
@@ -135,7 +135,7 @@ class Layer(BaseLayer):
 
         Z-axis dependency is same as in `self`.
         """
-        layer_new = Layer(name, thickness, active=active)
+        layer_new = CustomLayer(name, thickness, active=active)
         x = np.array([0, thickness])
         f = np.zeros(2)
         for key in self.dct_x:
@@ -176,7 +176,7 @@ class LaserDiode:
         Parameters
         ----------
         layers : list
-            Layers that compose the diode (`Layer` objects).
+            Layers that compose the diode (`BaseLayer` objects).
         L : number
             Resonator length (cm).
         w : number
@@ -198,7 +198,7 @@ class LaserDiode:
 
         """
         # copy inputs
-        assert all(isinstance(layer, Layer) for layer in layers)
+        assert all(isinstance(layer, BaseLayer) for layer in layers)
         self.layers = list(layers)
         self.L = L
         self.w = w
