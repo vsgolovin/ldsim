@@ -2,7 +2,7 @@
 Classes for defining laser diode vertical (epitaxial) and lateral design.
 """
 
-from typing import Union
+from typing import Union, List
 import numpy as np
 from scipy.interpolate import interp1d
 from ldsim import constants as const, units
@@ -62,15 +62,25 @@ class BaseLayer:
     def get_thickness(self):
         return self.dx
 
+    def get_parameters(self) -> List[str]:
+        return list(self.dct_x.keys())
+
     def _choose_dict(self, axis):
         "Choose dictionary of polynomials for `axis`"
         if axis not in ('x', 'z'):
             raise ValueError(f'Unknown axis {axis}')
         return self.dct_x if axis == 'x' else self.dct_z
 
+    def _calculate_param(self, param: str, x: Union[float, np.ndarray],
+                         z: Union[float, np.ndarray]):
+        p_x = self.dct_x[param]
+        p_z = self.dct_z[param]
+        return np.polyval(p_x, x) + np.polyval(p_z + [0.0], z)
+
     def calculate(self, param: str, x: Union[float, np.ndarray],
                   z: Union[float, np.ndarray] = 0.0):
-        raise NotImplementedError
+        "Calculate value of parameter `param` at location (`x`, `z`)."
+        return self._calculate_param(param, x, z)
 
     def update(self, d: dict, axis: str = 'x', is_new: bool = False):
         """
@@ -105,12 +115,6 @@ class CustomLayer(BaseLayer):
     REQUIRED_PARAMS = (
         'Ev', 'Ec', 'Eg', 'Nc', 'Nv', 'mu_n', 'mu_p', 'tau_n', 'tau_p',
         'B', 'Cn', 'Cp', 'eps', 'n_refr', 'fca_e', 'fca_h', 'T')
-
-    def calculate(self, param, x, z=0.0):
-        "Calculate value of parameter `param` at location (`x`, `z`)."
-        p_x = self.dct_x[param]
-        p_z = self.dct_z[param]
-        return np.polyval(p_x, x) + np.polyval(p_z + [0.0], z)
 
     def update(self, d, axis='x', is_new=False):
         super().update(d, axis, is_new)
@@ -154,17 +158,20 @@ class MaterialLayer(BaseLayer):
         assert isinstance(material, Material)
         self.material = material
         args = material.get_arguments()
+        args = [arg for arg in args if arg not in self.dct_x]
         self.dct_x.update(dict.fromkeys(args, [np.nan]))
         self.dct_z.update(dict.fromkeys(args, []))
 
     def calculate(self, param: str, x: Union[float, np.ndarray],
                   z: Union[float, np.ndarray] = 0.0):
+        "Calculate value of parameter `param` at location (`x`, `z`)."
+        if param in self.dct_x:  # not defined by material
+            return self._calculate_param(param, x, z)
         # calculate values of arguments (alloy composition, temperature, etc)
+        # inefficient -- same calculations for every material parameter
         kwargs = {}
         for key in self.dct_x:
-            p_x = self.dct_x[key]
-            p_z = self.dct_z[key]
-            kwargs[key] = np.polyval(p_x, x) + np.polyval(p_z + [0.0], z)
+            kwargs[key] = self._calculate_param(key, x, z)
         return self.material.calculate(param, **kwargs)
 
 
@@ -200,6 +207,10 @@ class LaserDiode:
         # copy inputs
         assert all(isinstance(layer, BaseLayer) for layer in layers)
         self.layers = list(layers)
+        for layer in self.layers:
+            if (isinstance(layer, MaterialLayer)
+                    and 'wavelength' in layer.get_parameters()):
+                layer.update({'wavelength': lam})
         self.L = L
         self.w = w
         assert 0 < R1 <= 1 and 0 < R2 <= 1
