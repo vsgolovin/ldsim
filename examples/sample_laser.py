@@ -19,38 +19,31 @@ d40 = dict(Ev=-0.2, Ec=1.724, Nc=7.5e17, Nv=1.2e19, mu_n=800, mu_p=100,
 
 # create Layer objects
 ncont = CustomLayer(name='n-contact', thickness=0.25e-4)
-ncont.update(d0)
-ncont.update({'Nd': 1e18})
+ncont.update(**d0, Nd=1e18)
 
 ncl = CustomLayer(name='n-cladding', thickness=1.4e-4)
-ncl.update(d40)
-ncl.update({'Nd': 5e17})
+ncl.update(**d40, Nd=5e17)
 
 ngrad2 = ncont.make_gradient_layer(ncl, 'gradient', 0.1e-4)
 
 nwg = CustomLayer(name='n-waveguide', thickness=0.45e-4)
-nwg.update(d25)
-nwg.update({'Nd': 1e17})
+nwg.update(**d25, Nd=1e17)
 
 ngrad = ncl.make_gradient_layer(nwg, 'gradient', 0.1e-4)
 
 act = CustomLayer(name='active', thickness=0.03e-4, active=True)
-act.update(d0)
-act.update({'Nd': 2e16, 'g0': 1500, 'N_tr': 1.85e18})
+act.update(**d0, Nd=2e16, g0=1500, N_tr=1.85e18)
 
 pwg = CustomLayer(name='p-waveguide', thickness=0.45e-4)
-pwg.update(d25)
-pwg.update({'Na': 1e17})
+pwg.update(**d25, Na=1e17)
 
 pcl = CustomLayer(name='p-cladding', thickness=1.4e-4)
-pcl.update(d40)
-pcl.update({'Na': 1e18})
+pcl.update(**d40, Na=1e18)
 
 pgrad = pwg.make_gradient_layer(pcl, 'gradient', 0.1e-4)
 
 pcont = CustomLayer(name='p-contact', thickness=0.25e-4)
-pcont.update(d0)
-pcont.update({'Na': 2e18})
+pcont.update(**d0, Na=2e18)
 
 pgrad2 = pcl.make_gradient_layer(pcont, 'gradient', 0.1e-4)
 

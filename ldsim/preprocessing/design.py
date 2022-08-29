@@ -44,8 +44,9 @@ class BaseLayer:
         self.dct_z = dict.fromkeys(params, [])  # constant term omitted
 
         # initial values for temperature and doping densities
-        self.update(self.DEFAULT_PARAMS, 'x', is_new=True)
-        self.update({k: [] for k in self.DEFAULT_PARAMS}, 'z', is_new=True)
+        self.update('x', is_new=True, **self.DEFAULT_PARAMS)
+        self.update(axis='z', is_new=True,
+                    **{k: [] for k in self.DEFAULT_PARAMS})
 
     def __repr__(self):
         s1 = 'Layer \"{}\"'.format(self.name)
@@ -82,14 +83,13 @@ class BaseLayer:
         "Calculate value of parameter `param` at location (`x`, `z`)."
         return self._calculate_param(param, x, z)
 
-    def update(self, d: dict, axis: str = 'x', is_new: bool = False):
+    def update(self, axis: str = 'x', is_new: bool = False, **kwargs):
         """
-        Update x- or z-axis dependencies of parameters according to contents
-        of dictionary `d` that maps parameter names to polynomial coefficients.
+        Update x- or z-axis dependencies of parameters with polynomial
+        coefficients passed as keyword arguments `kwargs`.
         """
-        assert isinstance(d, dict)
         dct = self._choose_dict(axis)
-        for k, v in d.items():
+        for k, v in kwargs.items():
             if not is_new and k not in dct:
                 raise ValueError(f'Unknown parameter {k}')
             if isinstance(v, (int, float)):
@@ -116,9 +116,9 @@ class CustomLayer(BaseLayer):
         'Ev', 'Ec', 'Eg', 'Nc', 'Nv', 'mu_n', 'mu_p', 'tau_n', 'tau_p',
         'B', 'Cn', 'Cp', 'eps', 'n_refr', 'fca_e', 'fca_h', 'T')
 
-    def update(self, d, axis='x', is_new=False):
-        super().update(d, axis, is_new)
-        if 'Ec' in d or 'Ev' in d:
+    def update(self, axis='x', is_new=False, **kwargs):
+        super().update(axis, is_new, **kwargs)
+        if 'Ec' in kwargs or 'Ev' in kwargs:
             self._update_Eg(axis)
 
     def _update_Eg(self, axis):
@@ -146,8 +146,8 @@ class CustomLayer(BaseLayer):
             f[0] = self.calculate(key, self.dx)
             f[1] = other.calculate(key, 0)
             p = np.polyfit(x=x, y=f, deg=1)
-            layer_new.update({key: p}, axis='x')
-        layer_new.update(self.dct_z, axis='z')
+            layer_new.update(axis='x', **{key: p})
+        layer_new.update(axis='z', **self.dct_z)
         return layer_new
 
 
@@ -210,7 +210,7 @@ class LaserDiode:
         for layer in self.layers:
             if (isinstance(layer, MaterialLayer)
                     and 'wavelength' in layer.get_parameters()):
-                layer.update({'wavelength': lam})
+                layer.update(wavelength=lam)
         self.L = L
         self.w = w
         assert 0 < R1 <= 1 and 0 < R2 <= 1
