@@ -39,8 +39,8 @@ class BaseLayer:
         params = self.REQUIRED_PARAMS
         if active:
             params = params + self.ACTIVE_PARAMS
-        # use `nan` to make undefined params more noticeable
-        self.dct_x = dict.fromkeys(params, [np.nan])
+        # use None for undefined parameters
+        self.dct_x = dict.fromkeys(params, None)
         self.dct_z = dict.fromkeys(params, [])  # constant term omitted
 
         # initial values for temperature and doping densities
@@ -75,6 +75,8 @@ class BaseLayer:
     def _calculate_param(self, param: str, x: Union[float, np.ndarray],
                          z: Union[float, np.ndarray]):
         p_x = self.dct_x[param]
+        if p_x is None:
+            return None
         p_z = self.dct_z[param]
         return np.polyval(p_x, x) + np.polyval(p_z + [0.0], z)
 
@@ -118,7 +120,7 @@ class CustomLayer(BaseLayer):
 
     def update(self, axis='x', is_new=False, **kwargs):
         super().update(axis, is_new, **kwargs)
-        if 'Ec' in kwargs or 'Ev' in kwargs:
+        if not is_new and ('Ec' in kwargs or 'Ev' in kwargs):
             self._update_Eg(axis)
 
     def _update_Eg(self, axis):
@@ -146,7 +148,7 @@ class CustomLayer(BaseLayer):
             f[0] = self.calculate(key, self.dx)
             f[1] = other.calculate(key, 0)
             p = np.polyfit(x=x, y=f, deg=1)
-            layer_new.update(axis='x', **{key: p})
+            layer_new.update(axis='x', is_new=True, **{key: p})
         layer_new.update(axis='z', **self.dct_z)
         return layer_new
 
@@ -159,7 +161,7 @@ class MaterialLayer(BaseLayer):
         self.material = material
         args = material.get_arguments()
         args = [arg for arg in args if arg not in self.dct_x]
-        self.dct_x.update(dict.fromkeys(args, [np.nan]))
+        self.dct_x.update(dict.fromkeys(args, None))
         self.dct_z.update(dict.fromkeys(args, []))
 
     def calculate(self, param: str, x: Union[float, np.ndarray],
@@ -171,7 +173,9 @@ class MaterialLayer(BaseLayer):
         # inefficient -- same calculations for every material parameter
         kwargs = {}
         for key in self.dct_x:
-            kwargs[key] = self._calculate_param(key, x, z)
+            val = self._calculate_param(key, x, z)
+            if val is not None:
+                kwargs[key] = val
         return self.material.calculate(param, **kwargs)
 
 
@@ -311,22 +315,34 @@ class LaserDiode:
         return inds, dx
 
     def calculate(self, param, x, z=0.0, inds=None, dx=None):
-        "Calculate values of `param` at locations (`x`, `z`)."
-        if isinstance(x, (float, int)):
-            ind, dx = self._ind_dx(x)
-            val = self.layers[ind].calculate(param, dx, z)
-        else:
-            val = np.zeros_like(x)
-            if inds is None or dx is None:
-                inds, dx = self._inds_dx(x)
-            for i, layer in enumerate(self.layers):
-                ix = (inds == i)
-                if ix.any():
-                    if isinstance(z, np.ndarray):
-                        z_layer = z[ix]
-                    else:
-                        z_layer = z
-                    val[ix] = layer.calculate(param, dx[ix], z_layer)
+        """
+        Calculate values of `param` at locations (`x`, `z`).
+
+        Parameters
+        ----------
+        x : np.ndarray
+            x-coordinates of points.
+        z : np.ndarray or number
+            z-coordinates of points.
+        inds : np.ndarray, optional
+            Layer indices of points. For example, if `inds[i] == 3`, then
+            the point `x[i]` belongs to layer `i`.
+        dx : np.ndarray, optional
+            x-offsets from layer bottom points.
+
+        """
+        assert isinstance(x, np.ndarray)
+        val = np.zeros_like(x)
+        if inds is None or dx is None:
+            inds, dx = self._inds_dx(x)
+        for i, layer in enumerate(self.layers):
+            ix = (inds == i)
+            if ix.any():
+                if isinstance(z, np.ndarray):
+                    z_layer = z[ix]
+                else:
+                    z_layer = z
+                val[ix] = layer.calculate(param, dx[ix], z_layer)
         if self.is_dimensionless:
             val /= units.dct[param]
         return val

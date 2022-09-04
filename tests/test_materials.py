@@ -29,5 +29,5 @@ def test_overwrite():
     ans_params = {'a': ['B'], 'b': ['B', 'A'], 'x': ['C']}
     ans_rv = {'A': 16, 'B': 104, 'C': -21}
 
-    assert (mat.params == ans_params and mat.args == ans_args
+    assert (mat.a2params == ans_params and mat.p2args == ans_args
             and mat.calculate_all(a=10, b=-4, x=21) == ans_rv)

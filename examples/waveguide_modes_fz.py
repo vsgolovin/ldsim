@@ -10,7 +10,7 @@ DN_DZ = -0.2  # refractive index z derivative (1 / cm)
 for layer in layers:
     name = layer.name
     if 'waveguide' in name or 'active' in name:
-        layer.update({'n_refr': DN_DZ}, axis='z')
+        layer.update(n_refr=DN_DZ, axis='z')
 
 # construct laser
 laser = LaserDiodeModel2d(layers, L=0.2, w=0.01, R1=0.95, R2=0.05, lam=0.87e-4,

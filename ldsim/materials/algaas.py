@@ -108,26 +108,27 @@ def free_carrier_absorption_holes():
 
 
 class AlGaAs(Material):
-    def __init__(self, name='AlGaAs', args=('x', 'T', 'wavelength')):
-        super().__init__(name, args)
-        self.set_params({
-            'Eg': bandgap,
-            'Ec': conduction_band_bottom,
-            'Ev': valence_band_top,
-            'Nc': cb_effective_dos,
-            'Nv': vb_effective_dos,
-            'mu_n': electron_mobility,
-            'mu_p': hole_mobility,
-            'tau_n': srh_electron_lifetime,
-            'tau_p': srh_hole_lifetime,
-            'B': radiative_recombination_coeff,
-            'Cn': auger_coefficient_n,
-            'Cp': auger_coefficient_p,
-            'eps': permittivity,
-            'n_refr': refractive_index,
-            'fca_e': free_carrier_absorption_electrons,
-            'fca_h': free_carrier_absorption_holes,
-        })
+    def __init__(self, name='AlGaAs', **kwargs):
+        kwargs['T'] = kwargs.get('T', 300.0)  # set default temperature
+        super().__init__(name=name, args=('x', 'T', 'wavelength'), **kwargs)
+        self.set_params(
+            Eg=bandgap,
+            Ec=conduction_band_bottom,
+            Ev=valence_band_top,
+            Nc=cb_effective_dos,
+            Nv=vb_effective_dos,
+            mu_n=electron_mobility,
+            mu_p=hole_mobility,
+            tau_n=srh_electron_lifetime,
+            tau_p=srh_hole_lifetime,
+            B=radiative_recombination_coeff,
+            Cn=auger_coefficient_n,
+            Cp=auger_coefficient_p,
+            eps=permittivity,
+            n_refr=refractive_index,
+            fca_e=free_carrier_absorption_electrons,
+            fca_h=free_carrier_absorption_holes
+        )
 
 
 if __name__ == '__main__':
